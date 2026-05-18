@@ -178,7 +178,13 @@ scripts/release-preflight.sh
 ```
 
 It verifies the local gates, package availability, published module resolution,
-published HEADs, and absence of local replaces.
+published HEADs, and absence of local replaces. If local DNS cannot resolve
+GitHub, set `GITHUB_RESOLVE_IP` to a current `github.com` address for the Git
+remote checks:
+
+```sh
+GITHUB_RESOLVE_IP=140.82.116.3 scripts/release-preflight.sh
+```
 
 The `udp` mode opens two ordinary Go UDP sockets on the selected interface,
 sets Darwin `IP_BOUND_IF` or `IPV6_BOUND_IF` for AWDL or scoped IPv6 sockets,

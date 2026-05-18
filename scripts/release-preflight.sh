@@ -5,6 +5,7 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 demo_dir=${DEMO_DIR:-$(cd -- "$script_dir/.." && pwd)}
 apple_dir=${APPLE_DIR:-$(cd -- "$demo_dir/../apple" && pwd)}
 apple_pion_dir=${APPLE_PION_DIR:-$(cd -- "$demo_dir/../apple-pion" && pwd)}
+github_resolve_ip=${GITHUB_RESOLVE_IP:-}
 
 failures=0
 
@@ -28,11 +29,21 @@ warn() {
 	printf 'WARN: %s\n' "$*" >&2
 }
 
+git_repo() {
+	local repo=$1
+	shift
+	if [[ -n $github_resolve_ip ]]; then
+		git -C "$repo" -c "http.curloptResolve=github.com:443:$github_resolve_ip" "$@"
+	else
+		git -C "$repo" "$@"
+	fi
+}
+
 require_clean() {
 	local repo=$1
 	local name=$2
 	local status
-	status=$(git -C "$repo" status --porcelain)
+	status=$(git_repo "$repo" status --porcelain)
 	if [[ -n $status ]]; then
 		fail "$name worktree is dirty"
 		printf '%s\n' "$status"
@@ -43,13 +54,13 @@ require_remote() {
 	local repo=$1
 	local name=$2
 	local remote
-	remote=$(git -C "$repo" remote)
+	remote=$(git_repo "$repo" remote)
 	if [[ -z $remote ]]; then
 		fail "$name has no configured git remote"
 		return
 	fi
 	printf '%s remotes:\n' "$name"
-	git -C "$repo" remote -v
+	git_repo "$repo" remote -v
 }
 
 require_head_published() {
@@ -58,12 +69,12 @@ require_head_published() {
 	local remote=${3:-origin}
 	local branch=${4:-main}
 	local head remote_head
-	if ! git -C "$repo" remote get-url "$remote" >/dev/null 2>&1; then
+	if ! git_repo "$repo" remote get-url "$remote" >/dev/null 2>&1; then
 		fail "$name has no $remote remote"
 		return
 	fi
-	head=$(git -C "$repo" rev-parse HEAD)
-	if ! remote_head=$(git -C "$repo" ls-remote "$remote" "refs/heads/$branch" | awk '{print $1}'); then
+	head=$(git_repo "$repo" rev-parse HEAD)
+	if ! remote_head=$(git_repo "$repo" ls-remote "$remote" "refs/heads/$branch" | awk '{print $1}'); then
 		fail "$name cannot read $remote/$branch"
 		return
 	fi
@@ -109,6 +120,9 @@ require_published_module() {
 }
 
 section "local gates"
+if [[ -n $github_resolve_ip ]]; then
+	printf 'github_resolve_ip=%s\n' "$github_resolve_ip"
+fi
 run bash -n "$demo_dir/scripts/remote-diagnostics.sh"
 run bash -n "$demo_dir/scripts/remote-matrix.sh"
 run env GOWORK=off go -C "$demo_dir" test ./...
@@ -129,12 +143,12 @@ run go -C "$apple_dir" list ./x/network/nwpacket
 section "worktree state"
 require_clean "$demo_dir" "awdl-webrtc-apple-demo"
 require_clean "$apple_pion_dir" "apple-pion"
-if [[ -n $(git -C "$apple_dir" status --porcelain -- x/network/nwpacket) ]]; then
+if [[ -n $(git_repo "$apple_dir" status --porcelain -- x/network/nwpacket) ]]; then
 	fail "apple x/network/nwpacket has local changes"
 fi
-if [[ -n $(git -C "$apple_dir" status --porcelain) ]]; then
+if [[ -n $(git_repo "$apple_dir" status --porcelain) ]]; then
 	warn "apple worktree has unrelated local changes"
-	git -C "$apple_dir" status --short | sed -n '1,80p'
+	git_repo "$apple_dir" status --short | sed -n '1,80p'
 fi
 
 section "release blockers"

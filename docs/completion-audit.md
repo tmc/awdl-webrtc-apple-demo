@@ -8,7 +8,7 @@ do not complete requirements that need a fresh two-host run.
 
 | Gate | Current result |
 | --- | --- |
-| Release preflight | PASS: `scripts/release-preflight.sh` passes with GitHub reachable through per-command `http.curloptResolve`. |
+| Release preflight | PASS: `scripts/release-preflight.sh` passes; use `GITHUB_RESOLVE_IP=140.82.116.3` when local DNS cannot resolve GitHub. |
 | Published modules | PASS: the demo resolves `github.com/tmc/apple v0.6.7` and `github.com/tmc/apple-pion v0.1.0` from the module cache with no local replace. |
 | Published repos | PASS: demo, `apple-pion`, and `apple` HEADs are published at `origin/main`; `apple-pion` is tagged `v0.1.0`. |
 | Remote reachability | BLOCKED: `ssh -o ConnectTimeout=5 -o BatchMode=yes tmc2@10.0.18.249 true` times out. |
