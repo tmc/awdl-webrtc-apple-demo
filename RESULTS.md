@@ -14,7 +14,7 @@ Scope terms:
 
 | Question / Area | Status | Answer | Evidence | Caveat / Next |
 | --- | --- | --- | --- | --- |
-| Repo location | PASS | The demo is in `~/go/src/github.com/tmc/awdl-webrtc-apple-demo`. | Productization includes reusable packet and Pion transport packages plus docs/audit tables. | Uses released `github.com/tmc/apple v0.6.3`. |
+| Repo location | PASS | The demo is in `~/go/src/github.com/tmc/awdl-webrtc-apple-demo`. | Productization includes reusable packet and Pion transport packages plus docs/audit tables. | Uses local replaces for sibling `tmc/apple` and `tmc/apple-pion` until releases carry these packages. |
 | Build | PASS | The module builds. | `go test ./...` -> `[no test files]`. | Darwin-only demo. |
 | WebRTC support | PASS | Yes, via Pion WebRTC with constrained ICE. | Modes: `check`, `gather`, `pair`, `answer-stdio`, `offer-ssh`. | `offer-ssh` is explicit demo signaling, not a general signaling service. |
 | Pion changes | PASS | No Pion fork or patch was needed. | Uses `SettingEngine` filters, mDNS mode, `SetICEUDPMux`, `SetNet`, explicit SDP exchange, and `internal/icepolicy`. | AWDL raw-candidate publication is still demo-side SDP mutation. |
