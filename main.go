@@ -106,7 +106,7 @@ func main() {
 	backendName := flag.String("backend", string(udpBackendGo), "UDP backend: go or network")
 	pionNet := flag.Bool("pion-net", false, "use Network.framework as Pion transport.Net instead of ICE UDP mux")
 	mdnsName := flag.String("mdns", "query-and-gather", "ICE mDNS mode: query-and-gather, query-only, or disabled")
-	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-ssh, udp, udp-listen, udp-send, udp-perf, udp-perf-listen, or udp-perf-send")
+	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-ssh, udp, udp-listen, udp-send, udp-perf, udp-perf-listen, udp-perf-send, or ui")
 	timeout := flag.Duration("timeout", 8*time.Second, "timeout for WebRTC and UDP modes")
 	peerAddr := flag.String("peer", "", "remote UDP address for udp-send, such as [fe80::1%awdl0]:12345")
 	sshTarget := flag.String("ssh", "", "ssh target for offer-ssh, such as tmc2@10.0.18.249")
@@ -120,6 +120,9 @@ func main() {
 	window := flag.Int("window", 1, "UDP perf maximum in-flight echo requests")
 	packetTimeout := flag.Duration("packet-timeout", time.Second, "UDP perf per-datagram echo timeout")
 	perfJSON := flag.Bool("perf-json", false, "also print UDP perf result records as JSON lines")
+	uiInterval := flag.Duration("ui-interval", 3*time.Second, "SwiftUI link monitor sample interval")
+	uiCount := flag.Int("ui-count", 20, "SwiftUI link monitor datagrams per sample")
+	uiWindow := flag.Int("ui-window", 4, "SwiftUI link monitor maximum in-flight datagrams per sample")
 	flag.Parse()
 
 	profile, err := profileByName(*profileName)
@@ -236,6 +239,17 @@ func main() {
 		runWithTimeout(*timeout, func(ctx context.Context) error {
 			return udpPerfSend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials, *window, *packetTimeout, *perfJSON)
 		})
+	case "ui":
+		if err := runLinkHealthUI(context.Background(), linkHealthConfig{
+			Backend:       backend,
+			Interval:      *uiInterval,
+			Count:         *uiCount,
+			Size:          *size,
+			Window:        *uiWindow,
+			PacketTimeout: *packetTimeout,
+		}); err != nil {
+			fail(err)
+		}
 	default:
 		fail(fmt.Errorf("unknown -mode %q", *mode))
 	}
