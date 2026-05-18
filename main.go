@@ -123,7 +123,7 @@ func main() {
 	peerAddr := flag.String("peer", "", "remote UDP address for udp-send, such as [fe80::1%awdl0]:12345")
 	sshTarget := flag.String("ssh", "", "ssh target for offer-ssh, such as tmc2@10.0.18.249")
 	remoteBin := flag.String("remote-bin", "/tmp/awdl-webrtc-apple-demo-bin", "remote binary path for offer-ssh")
-	rawCandidates := flag.Bool("raw-candidates", false, "rewrite gathered host candidates to the selected interface IP during explicit signaling")
+	rawCandidates := flag.Bool("raw-candidates", false, "publish explicit host candidates with the selected interface IP during signaling")
 	message := flag.String("message", "ping", "UDP payload for udp and udp-send")
 	count := flag.Int("count", 1000, "UDP perf datagram count")
 	duration := flag.Duration("duration", 0, "UDP perf trial duration; when set, run each trial for this long instead of using -count")

@@ -179,6 +179,26 @@ func TestNewWireSignalPublishesRawCandidates(t *testing.T) {
 	}
 }
 
+func TestNewWireSignalWithoutRawCandidatesKeepsDescriptionOnly(t *testing.T) {
+	desc := webrtc.SessionDescription{
+		Type: webrtc.SDPTypeOffer,
+		SDP: strings.Join([]string{
+			"v=0",
+			"m=application 9 UDP/DTLS/SCTP webrtc-datachannel",
+			"a=mid:0",
+			"a=candidate:1 1 udp 2130706431 fd00::1 12345 typ host ufrag test",
+			"a=end-of-candidates",
+		}, "\n"),
+	}
+	signal := newWireSignal(desc, icepolicy.Policy{}, net.ParseIP("fe80::1"))
+	if signal.Description.SDP != desc.SDP {
+		t.Fatalf("description SDP changed:\n%s", signal.Description.SDP)
+	}
+	if len(signal.Candidates) != 0 {
+		t.Fatalf("candidates = %d, want 0", len(signal.Candidates))
+	}
+}
+
 func TestDecodeWireSignalAcceptsLegacyDescription(t *testing.T) {
 	desc := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: "v=0"}
 	data, err := json.Marshal(desc)
