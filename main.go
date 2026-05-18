@@ -194,45 +194,45 @@ func main() {
 	case "check":
 		fmt.Printf("pion webrtc interface_filter=%s network_types=udp4,udp6 mdns=%s udp_backend=%s pion_net=%t\n", iface.Name, mdnsModeString(mdnsMode), backend, *pionNet)
 	case "gather":
-		if err := gather(ctxWithTimeout(*timeout), profile, iface, backend, *pionNet, mdnsMode, candidatePolicy); err != nil {
-			fail(err)
-		}
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return gather(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy)
+		})
 	case "pair":
-		if err := pair(ctxWithTimeout(*timeout), profile, iface, backend, *pionNet, mdnsMode, candidatePolicy); err != nil {
-			fail(err)
-		}
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return pair(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy)
+		})
 	case "answer-stdio":
-		if err := answerStdio(ctxWithTimeout(*timeout), profile, iface, backend, *pionNet, mdnsMode, candidatePolicy); err != nil {
-			fail(err)
-		}
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return answerStdio(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy)
+		})
 	case "offer-ssh":
-		if err := offerSSH(ctxWithTimeout(*timeout), profile, iface, backend, *pionNet, mdnsMode, candidatePolicy, *timeout, *sshTarget, *remoteBin); err != nil {
-			fail(err)
-		}
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return offerSSH(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy, *timeout, *sshTarget, *remoteBin)
+		})
 	case "udp":
-		if err := udpEcho(ctxWithTimeout(*timeout), profile, iface, backend, *message); err != nil {
-			fail(err)
-		}
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return udpEcho(ctx, profile, iface, backend, *message)
+		})
 	case "udp-listen":
-		if err := udpListen(ctxWithTimeout(*timeout), profile, iface, backend); err != nil {
-			fail(err)
-		}
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return udpListen(ctx, profile, iface, backend)
+		})
 	case "udp-send":
-		if err := udpSend(ctxWithTimeout(*timeout), profile, iface, backend, *peerAddr, *message); err != nil {
-			fail(err)
-		}
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return udpSend(ctx, profile, iface, backend, *peerAddr, *message)
+		})
 	case "udp-perf":
-		if err := udpPerf(ctxWithTimeout(*timeout), profile, iface, backend, *count, *size, *warmup, *trials); err != nil {
-			fail(err)
-		}
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return udpPerf(ctx, profile, iface, backend, *count, *size, *warmup, *trials)
+		})
 	case "udp-perf-listen":
-		if err := udpPerfListen(ctxWithTimeout(*timeout), profile, iface, backend, *count+*warmup); err != nil {
-			fail(err)
-		}
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return udpPerfListen(ctx, profile, iface, backend, *count+*warmup)
+		})
 	case "udp-perf-send":
-		if err := udpPerfSend(ctxWithTimeout(*timeout), profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials); err != nil {
-			fail(err)
-		}
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return udpPerfSend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials)
+		})
 	default:
 		fail(fmt.Errorf("unknown -mode %q", *mode))
 	}
@@ -1623,9 +1623,12 @@ func wait(ctx context.Context, ch <-chan struct{}, name string) error {
 	}
 }
 
-func ctxWithTimeout(timeout time.Duration) context.Context {
-	ctx, _ := context.WithTimeout(context.Background(), timeout)
-	return ctx
+func runWithTimeout(timeout time.Duration, fn func(context.Context) error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := fn(ctx); err != nil {
+		fail(err)
+	}
 }
 
 func deadline(ctx context.Context) time.Time {
