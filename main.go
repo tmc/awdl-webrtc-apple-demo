@@ -22,12 +22,12 @@ import (
 	"github.com/pion/ice/v4"
 	piontransport "github.com/pion/transport/v4"
 	"github.com/pion/webrtc/v4"
+	"github.com/tmc/apple-pion/icepolicy"
 	"github.com/tmc/apple-pion/nwtransport"
 	applenetwork "github.com/tmc/apple/network"
 	"github.com/tmc/apple/objc"
 	"github.com/tmc/apple/objectivec"
 	"github.com/tmc/apple/x/network/nwpacket"
-	"github.com/tmc/awdl-webrtc-apple-demo/internal/icepolicy"
 	"golang.org/x/sys/unix"
 )
 
@@ -2404,7 +2404,7 @@ func newWireSignal(desc webrtc.SessionDescription, policy icepolicy.Policy, loca
 	if !policy.UsesSyntheticHostCandidate(localIP) {
 		return wireSignal{Description: desc}
 	}
-	candidates := candidateInitsFromSDP(desc.SDP, policy, localIP)
+	candidates := icepolicy.CandidateInitsFromSDP(desc.SDP, policy, localIP)
 	desc.SDP = icepolicy.StripSDPCandidates(desc.SDP)
 	return wireSignal{Description: desc, Candidates: candidates}
 }
@@ -2547,35 +2547,6 @@ func publishedCandidateLines(sdp string, policy icepolicy.Policy, localIP net.IP
 		lines[i] = "a=" + policy.PublishCandidate(candidate, localIP)
 	}
 	return lines
-}
-
-func candidateInitsFromSDP(sdp string, policy icepolicy.Policy, localIP net.IP) []webrtc.ICECandidateInit {
-	var candidates []webrtc.ICECandidateInit
-	var mid string
-	var mline int
-	for _, line := range strings.Split(sdp, "\n") {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "m="):
-			mline++
-			mid = ""
-		case strings.HasPrefix(line, "a=mid:"):
-			mid = strings.TrimPrefix(line, "a=mid:")
-		case strings.HasPrefix(line, "a=candidate:"):
-			candidate := strings.TrimPrefix(line, "a=")
-			init := webrtc.ICECandidateInit{Candidate: policy.PublishCandidate(candidate, localIP)}
-			if mid != "" {
-				midCopy := mid
-				init.SDPMid = &midCopy
-			}
-			if mline > 0 {
-				index := uint16(mline - 1)
-				init.SDPMLineIndex = &index
-			}
-			candidates = append(candidates, init)
-		}
-	}
-	return candidates
 }
 
 func candidatesUseInterface(candidates []string, ips []net.IP) bool {

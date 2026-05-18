@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/pion/webrtc/v4"
-	"github.com/tmc/awdl-webrtc-apple-demo/internal/icepolicy"
+	"github.com/tmc/apple-pion/icepolicy"
 )
 
 func TestShouldBindUDPToInterface(t *testing.T) {
