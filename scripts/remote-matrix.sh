@@ -325,6 +325,9 @@ run_remote_callback_then_local_request() {
 	return "$rc"
 }
 
+printf '## remote reachability\n'
+remote "true"
+
 printf '## build local binary\n'
 run go build -o "$local_bin" .
 

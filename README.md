@@ -152,8 +152,9 @@ SSH_TARGET=tmc2@10.0.18.249 \
   scripts/remote-diagnostics.sh
 ```
 
-The script builds a temporary local binary, copies it to `REMOTE_BIN` on the
-peer, then runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus
+The script first checks SSH reachability, then builds a temporary local binary,
+copies it to `REMOTE_BIN` on the peer, and runs LAN, Thunderbolt, and AWDL
+`-pion-net` WebRTC plus
 Network.framework UDP perf, latency, and callback probes in both directions.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `NW_CONNECT_TIMEOUT`, or
