@@ -172,7 +172,8 @@ UDP probes record listener-side route, `lsof`, and `netstat` output for the
 printed listener host/port plus sender-side route checks before sending, so
 zero-datagram failures have socket and route context in the transcript. The
 `cmd/matrix-summary` command reads the saved transcript and renders the JSON
-perf/latency records as a compact Markdown table.
+perf/latency records plus de-duplicated failed matrix steps as a compact
+Markdown table.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `OUTPUT`,
 `NW_CONNECT_TIMEOUT`, `NW_CONNECT_RETRIES`, `CANDIDATE_POLICY`, or
