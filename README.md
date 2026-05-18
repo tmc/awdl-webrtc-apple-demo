@@ -131,6 +131,16 @@ Network.framework UDP perf in both directions. Override `PROFILES`, `COUNT`,
 `WARMUP`, `TRIALS`, `WINDOW`, `TIMEOUT`, `LOCAL_BIN`, or `REMOTE_BIN` to narrow
 or lengthen a run.
 
+Before cutting releases or removing local module replaces, run:
+
+```sh
+scripts/release-preflight.sh
+```
+
+It verifies the local gates and package availability, then fails until the demo
+and `apple-pion` have remotes, the needed `tmc/apple` commit is published, and
+the local `replace` directives can be removed.
+
 The `udp` mode opens two ordinary Go UDP sockets on the selected interface,
 sets Darwin `IP_BOUND_IF` or `IPV6_BOUND_IF` for AWDL or scoped IPv6 sockets,
 and sends one echo datagram. On this host, AWDL UDP passes with IPv6 link-local

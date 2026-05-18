@@ -18,6 +18,8 @@ evidence.
 go test ./...
 go vet ./...
 bash -n scripts/remote-matrix.sh
+bash -n scripts/release-preflight.sh
+scripts/release-preflight.sh
 go run . -profile lan -backend network -mode gather -timeout 8s
 go run . -profile thunderbolt -backend network -mode gather -timeout 5s
 go run . -profile awdl -backend network -mdns disabled -raw-candidates -mode gather -timeout 10s
