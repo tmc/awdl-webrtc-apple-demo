@@ -14,7 +14,7 @@ Scope terms:
 
 | Question / Area | Status | Answer | Evidence | Caveat / Next |
 | --- | --- | --- | --- | --- |
-| Repo location | PASS | The demo is in `~/go/src/github.com/tmc/awdl-webrtc-apple-demo`. | Productization includes reusable packet and Pion transport packages plus docs/audit tables. | Uses a local replace for sibling `tmc/apple-pion` until that module has a release or remote. |
+| Repo location | PASS | The demo is in `~/go/src/github.com/tmc/awdl-webrtc-apple-demo`. | Productization includes reusable packet and Pion transport packages plus docs/audit tables. | No local `tmc/apple` or `tmc/apple-pion` replace remains. |
 | Build | PASS | The module builds and the focused tests pass. | `go test ./...`; `go vet ./...`; `git diff --check`. | Darwin-only demo. |
 | WebRTC support | PASS | Yes, via Pion WebRTC with constrained ICE. | Modes: `check`, `gather`, `pair`, `answer-stdio`, `offer-ssh`. | `offer-ssh` is explicit demo signaling, not a general signaling service. |
 | Pion changes | PASS | No Pion fork or patch was needed. | Uses `SettingEngine` filters, mDNS mode, `SetICEUDPMux`, `SetNet`, explicit signaling, and `apple-pion/icepolicy`. | AWDL raw-candidate publication is now explicit candidate signaling; fresh two-host rerun is pending while SSH is unreachable. |
@@ -68,8 +68,8 @@ Scope terms:
 | --- | --- | --- |
 | Build gate | `go test ./...`; `go vet ./...`; `git diff --check` | Demo tests pass; vet and whitespace checks pass. |
 | Productized packages | In `tmc/apple`: `go test ./x/network/nwpacket`; in `tmc/apple-pion`: `go test ./...` | Promoted `nwpacket`, `nwtransport`, and `icepolicy` tests pass. |
-| Network backend build pin | `go list -m -f '{{.Path}} {{.Version}} {{.Replace.Path}}' github.com/tmc/apple github.com/tmc/apple-pion` | `github.com/tmc/apple v0.6.7`; `github.com/tmc/apple-pion v0.0.0 ../apple-pion`. |
-| Release preflight | `scripts/release-preflight.sh` | Local gates and package availability pass; preflight currently fails because the demo resolves `github.com/tmc/apple-pion` through `../apple-pion` outside the module cache, demo and `apple-pion` have no remotes, their HEADs are not published, and the demo still uses a local `replace` for unreleased `apple-pion`. |
+| Network backend build pin | `go list -m -f '{{.Path}} {{.Version}} {{.Replace.Path}}' github.com/tmc/apple github.com/tmc/apple-pion` | `github.com/tmc/apple v0.6.7`; `github.com/tmc/apple-pion v0.1.0`. |
+| Release preflight | `scripts/release-preflight.sh` | Local gates and package availability pass; the demo resolves `github.com/tmc/apple-pion v0.1.0` from the module cache with no local replace. | Requires GitHub/DNS reachability to verify published HEADs. |
 | Remote productization matrix | `SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh` | Builds and copies the demo, then runs LAN/Thunderbolt/AWDL `-pion-net` WebRTC plus Network.framework UDP perf in both directions. `scripts/remote-diagnostics.sh` captures route/interface state before the run; `NW_CONNECT_TIMEOUT` and `NW_CONNECT_RETRIES` tune Network.framework readiness retry for every local and remote demo command. Currently blocked because SSH to `tmc2@10.0.18.249` times out. |
 | Network LAN gather | `go run . -profile lan -backend network -mode gather -timeout 8s` | Two mDNS host candidates from an `en0` Network.framework UDP mux. |
 | Pion-native LAN gather | `AWDL_DEMO_NETWORK_TRACE=1 go run . -profile lan -backend network -pion-net -mode gather -timeout 12s` | Ten mDNS host candidates; trace showed Network.framework listeners for each selected `en0` address. |

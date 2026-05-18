@@ -10,12 +10,11 @@ The reusable Network.framework surfaces are:
 - `github.com/tmc/apple/x/network/nwpacket`: a Network.framework
   `net.PacketConn`, consumed from released `github.com/tmc/apple v0.6.7`.
 - `github.com/tmc/apple-pion/nwtransport`: a small Pion `transport.Net`
-  adapter, consumed from the sibling `tmc/apple-pion` checkout through the
-  temporary `replace github.com/tmc/apple-pion => ../apple-pion`. It routes
-  concrete UDP listeners, configured wildcard UDP listeners, and UDP dials
-  through Network.framework, while leaving DNS, TCP, unconstrained wildcard
-  UDP, and TURN/STUN helper traffic outside that selected UDP surface on
-  Pion's standard network fallback.
+  adapter, consumed from released `github.com/tmc/apple-pion v0.1.0`. It
+  routes concrete UDP listeners, configured wildcard UDP listeners, and UDP
+  dials through Network.framework, while leaving DNS, TCP, unconstrained
+  wildcard UDP, and TURN/STUN helper traffic outside that selected UDP surface
+  on Pion's standard network fallback.
 - `github.com/tmc/apple-pion/icepolicy`: explicit link-local host-candidate
   publication helpers used by the demo's `-raw-candidates` signaling path.
 
@@ -171,10 +170,8 @@ Before cutting releases or removing local module replaces, run:
 scripts/release-preflight.sh
 ```
 
-It verifies the local gates and package availability, then fails until the demo
-and `apple-pion` have remotes, their HEADs are published, and the remaining
-local `apple-pion` replace can be removed so the demo resolves `apple-pion`
-from the module cache.
+It verifies the local gates, package availability, published module resolution,
+published HEADs, and absence of local replaces.
 
 The `udp` mode opens two ordinary Go UDP sockets on the selected interface,
 sets Darwin `IP_BOUND_IF` or `IPV6_BOUND_IF` for AWDL or scoped IPv6 sockets,
