@@ -46,6 +46,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/tmc/apple v0.6.7 h1:xsfBWu6Xx7Y3ABb8w8cXaGHXDUiPqYntTzgVT2UXYDo=
 github.com/tmc/apple v0.6.7/go.mod h1:yy3A4tLBZYBCTu5xG52ZdtaAfzpRdTsuH5sXZn3MjSs=
+github.com/tmc/apple-pion v0.1.0 h1:jZYnn7LIcGm8fPDE2k0TAU9e6KkrovW2Z6VdeijZ+OI=
+github.com/tmc/apple-pion v0.1.0/go.mod h1:L7eUUd9PY528QpTFbT2ILg37pGhUwMSPVj1iMHYPUfE=
 github.com/tmc/macgo v0.1.3 h1:zxrzmJOH7Z9b43IDxzM21TlJF0W88RCjfi2YeJhs0Pw=
 github.com/tmc/macgo v0.1.3/go.mod h1:X6P77neg6ent0JsJDbnhC64pks1izaAANCU5J21PH34=
 github.com/tmc/swiftui v0.0.0-20260512000920-5086d514a672 h1:d2LD2HwR3K6Yel1zxM274EayotJqz+At7l09yvRn7H4=
