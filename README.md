@@ -18,7 +18,7 @@ The reusable Network.framework surfaces are:
   wildcard UDP, and TURN/STUN helper traffic outside that selected UDP surface
   on Pion's standard network fallback.
 - `github.com/tmc/apple-pion/icepolicy`: explicit link-local host-candidate
-  publication helpers used by the demo's `-raw-candidates` signaling path.
+  publication helpers used by the demo's `-candidate-policy` signaling path.
 
 It has three profiles:
 
@@ -49,7 +49,7 @@ go run . -profile lan -backend network -pion-net -mode pair -timeout 15s
 go run . -profile thunderbolt -backend network -mode gather -timeout 10s
 go run . -profile awdl -backend network -mode gather -timeout 10s
 go run . -profile awdl -backend network -pion-net -mode gather -timeout 10s
-go run . -profile awdl -backend network -mdns disabled -raw-candidates -mode gather -timeout 10s
+go run . -profile awdl -backend network -mdns disabled -mode gather -timeout 10s
 
 go run . -profile thunderbolt -backend go -mode check
 go run . -profile thunderbolt -backend go -mode gather -timeout 10s
@@ -91,8 +91,8 @@ The `-backend` flag selects `go` or `network`.
 For WebRTC modes, `-pion-net` changes the Pion integration from
 `SetICEUDPMux` to `SettingEngine.SetNet` using `nwtransport`. LAN,
 Thunderbolt, and AWDL remote datachannels pass through this native Pion network
-seam when explicit signaling uses `-mdns disabled -raw-candidates`. AWDL mDNS
-candidate exchange still does not open a remote datachannel in this
+seam when explicit signaling uses `-mdns disabled -candidate-policy auto`.
+AWDL mDNS candidate exchange still does not open a remote datachannel in this
 environment.
 
 The `gather` mode binds Pion's ICE UDP mux to the selected interface address,
@@ -100,12 +100,15 @@ enables mDNS host candidates, and verifies candidates are either from the
 selected IP set or mDNS publication. mDNS is intentional: Pion filters raw IPv6
 link-local host candidates for privacy.
 
-For explicit two-process signaling, `-mdns disabled -raw-candidates` enables
-the reusable `apple-pion/icepolicy` host-candidate policy. It uses a synthetic
-non-link-local host candidate inside Pion and publishes the selected interface
-IP as explicit `ICECandidateInit` records alongside the unmodified SDP.
-This keeps the demo no-fork while making AWDL link-local ICE testable without
-SDP rewriting.
+For explicit two-process signaling, `-candidate-policy auto` is the default. It
+enables the reusable `apple-pion/icepolicy` host-candidate policy when mDNS is
+disabled on AWDL or another IPv6 link-local interface. The policy uses a
+synthetic non-link-local host candidate inside Pion and publishes the selected
+interface IP as explicit `ICECandidateInit` records alongside the unmodified
+SDP. This keeps the demo no-fork while making AWDL link-local ICE testable
+without SDP rewriting. Use `-candidate-policy mdns` to suppress explicit
+candidate publication, `-candidate-policy raw` to force it, or the legacy
+`-raw-candidates` alias for older scripts.
 
 The `pair` mode creates two local PeerConnections and exchanges a datachannel
 payload over the constrained interface. On this host, Thunderbolt Bridge pairing
@@ -117,24 +120,24 @@ SSH, exchanges SDP plus optional explicit ICE candidates over stdin/stdout, and
 waits for a WebRTC datachannel `ping`/`pong`:
 
 ```sh
-go run . -profile thunderbolt -backend network -mode offer-ssh \
+go run . -profile thunderbolt -backend network -mdns disabled -mode offer-ssh \
   -ssh tmc2@10.0.18.249 -remote-bin /tmp/awdl-webrtc-apple-demo-bin \
-  -raw-candidates -timeout 35s
+  -timeout 35s
 
-go run . -profile awdl -backend network -mdns disabled -raw-candidates \
+go run . -profile awdl -backend network -mdns disabled \
   -mode offer-ssh -ssh tmc2@10.0.18.249 \
   -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 45s
 
 go run . -profile lan -backend network -pion-net -mdns disabled \
-  -raw-candidates -mode offer-ssh -ssh tmc2@10.0.18.249 \
+  -mode offer-ssh -ssh tmc2@10.0.18.249 \
   -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 35s
 
 go run . -profile thunderbolt -backend network -pion-net -mdns disabled \
-  -raw-candidates -mode offer-ssh -ssh tmc2@10.0.18.249 \
+  -mode offer-ssh -ssh tmc2@10.0.18.249 \
   -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 40s
 
 go run . -profile awdl -backend network -pion-net -mdns disabled \
-  -raw-candidates -mode offer-ssh -ssh tmc2@10.0.18.249 \
+  -mode offer-ssh -ssh tmc2@10.0.18.249 \
   -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 45s
 ```
 
@@ -169,9 +172,11 @@ so one asymmetric UDP direction does not hide later evidence. The
 perf/latency records as a compact Markdown table.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `OUTPUT`,
-`NW_CONNECT_TIMEOUT`, `NW_CONNECT_RETRIES`, or `LISTEN_IDLE_TIMEOUT` to narrow,
-lengthen, save, or tune a run. When `DURATION` is set, sender trials run for
-that duration instead of a fixed datagram count and listeners stop after
+`NW_CONNECT_TIMEOUT`, `NW_CONNECT_RETRIES`, `CANDIDATE_POLICY`, or
+`LISTEN_IDLE_TIMEOUT` to narrow, lengthen, save, or tune a run.
+`CANDIDATE_POLICY` defaults to `auto` for the `-pion-net -mdns disabled`
+WebRTC step. When `DURATION` is set, sender trials run for that duration
+instead of a fixed datagram count and listeners stop after
 `LISTEN_IDLE_TIMEOUT` once traffic goes idle. Set
 `REQUIRE_PATHS=1` to add `-require-path-interface` and `-forbid-loopback-path`
 to sender runs; LAN defaults to `en0`, AWDL defaults to `awdl0`, and
@@ -255,6 +260,7 @@ AWDL_DEMO_NETWORK_TRACE=1 go run . -profile awdl -backend network -mode udp-perf
 The Network.framework backend proves Pion ICE gathering, raw UDP echo/perf, and
 remote WebRTC datachannel exchange over LAN, Thunderbolt, and AWDL. The
 `nwtransport` path demonstrates a Pion-native `transport.Net` backend for LAN,
-Thunderbolt, and AWDL WebRTC. AWDL still needs explicit SSH signaling plus raw
-candidate publication; the mDNS-only AWDL `SetNet` path gathers candidates but
-does not open the remote datachannel here.
+Thunderbolt, and AWDL WebRTC. AWDL still needs explicit SSH signaling plus
+link-local candidate publication through `-candidate-policy auto` or `raw`; the
+mDNS-only AWDL `SetNet` path gathers candidates but does not open the remote
+datachannel here.

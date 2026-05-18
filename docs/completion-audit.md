@@ -12,14 +12,14 @@ do not complete requirements that need a fresh two-host run.
 | Published modules | PASS: the demo resolves `github.com/tmc/apple v0.6.7` and `github.com/tmc/apple-pion v0.1.0` from the module cache with no local replace. |
 | Published repos | PASS: demo, `apple-pion`, and `apple` HEADs are published at `origin/main`; `apple-pion` is tagged `v0.1.0`. |
 | Remote reachability | BLOCKED: `ssh -o ConnectTimeout=5 -o BatchMode=yes tmc2@10.0.18.249 true` times out. |
-| Remote matrix | BLOCKED: `scripts/remote-matrix.sh` now records local route, ping, TCP/22, `scutil --nwi`, and interface-list diagnostics before checking SSH reachability; it exits before building/copying while `tmc2` is unreachable. Once setup succeeds, per-profile probes continue after failures and end with a matrix summary. |
+| Remote matrix | BLOCKED: `scripts/remote-matrix.sh` now records local route, ping, TCP/22, `scutil --nwi`, interface-list diagnostics, and `candidate_policy=auto` before checking SSH reachability; it exits before building/copying while `tmc2` is unreachable. Once setup succeeds, per-profile probes continue after failures and end with a matrix summary. |
 
 ## Requirement Checklist
 
 | Requirement | Artifact / evidence | Status | Remaining proof |
 | --- | --- | --- | --- |
 | Full Pion-native backend | `github.com/tmc/apple-pion/nwtransport` implements Pion `transport.Net`; demo uses `-pion-net`; `RESULTS.md` records LAN, Thunderbolt, and AWDL historical datachannel success. | PASS | None for the packaged UDP transport backend. Broader TCP/TURN/STUN Network.framework ownership is explicitly out of this demo slice. |
-| Durable AWDL/link-local candidates | `github.com/tmc/apple-pion/icepolicy`; demo keeps SDP unmodified and publishes explicit `ICECandidateInit` records; tests cover raw candidate extraction. | PARTIAL | Re-run `-pion-net -mdns disabled -raw-candidates offer-ssh` on LAN, Thunderbolt, and AWDL once `tmc2` is reachable. |
+| Durable AWDL/link-local candidates | `github.com/tmc/apple-pion/icepolicy`; demo keeps SDP unmodified and publishes explicit `ICECandidateInit` records; `-candidate-policy auto\|mdns\|raw`; tests cover raw candidate extraction and auto-policy selection; local AWDL `-pion-net -mdns disabled` gather prints `candidate_policy=auto raw_candidates=true`. | PARTIAL | Re-run `-pion-net -mdns disabled -candidate-policy auto offer-ssh` on LAN, Thunderbolt, and AWDL once `tmc2` is reachable. |
 | Direction/asymmetry cleanup | `udp-callback-listen`, `udp-callback-request`, path policy checks, `nwpacket` readiness retries, `remote-diagnostics.sh`, matrix-local reachability diagnostics, and a simultaneous bidirectional UDP matrix step are implemented. | PARTIAL | Run `SSH_TARGET=tmc2@10.0.18.249 scripts/remote-diagnostics.sh`, then `REQUIRE_PATHS=1 SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh`; inspect callback, local-to-remote UDP, and bidirectional UDP sections. |
 | Performance hardening | `udp-perf` supports `-duration`, `-trials`, `-window`, `-streams`, `-packet-timeout`, `-listen-idle-timeout`, loss columns, JSON, latency mode, bidirectional matrix probing, Network.framework path records, and `cmd/matrix-summary` Markdown summaries. | PARTIAL | Run longer two-host matrix samples with `DURATION`, `TRIALS`, `WINDOW`, and `STREAMS` after remote reachability returns, then summarize the transcript with `go run ./cmd/matrix-summary`. |
 | Reusable package split | `github.com/tmc/apple/x/network/nwpacket v0.6.7`; `github.com/tmc/apple-pion v0.1.0`; demo has no local replaces. | PASS | None. |
@@ -36,6 +36,7 @@ SSH_TARGET=tmc2@10.0.18.249 \
   OUTPUT=/tmp/awdl-webrtc-diagnostics.txt \
   scripts/remote-diagnostics.sh
 
+CANDIDATE_POLICY=auto \
 REQUIRE_PATHS=1 \
 SSH_TARGET=tmc2@10.0.18.249 \
 OUTPUT=/tmp/awdl-webrtc-matrix.txt \
@@ -44,7 +45,7 @@ scripts/remote-matrix.sh
 go run ./cmd/matrix-summary /tmp/awdl-webrtc-matrix.txt \
   > /tmp/awdl-webrtc-matrix-summary.md
 
-DURATION=10s TRIALS=5 WINDOW=8 STREAMS=2 REQUIRE_PATHS=1 \
+DURATION=10s TRIALS=5 WINDOW=8 STREAMS=2 CANDIDATE_POLICY=auto REQUIRE_PATHS=1 \
 SSH_TARGET=tmc2@10.0.18.249 \
 OUTPUT=/tmp/awdl-webrtc-matrix-long.txt \
 scripts/remote-matrix.sh
@@ -53,6 +54,6 @@ go run ./cmd/matrix-summary /tmp/awdl-webrtc-matrix-long.txt \
   > /tmp/awdl-webrtc-matrix-long-summary.md
 ```
 
-The goal is not complete until the fresh remote matrix proves the raw-candidate
+The goal is not complete until the fresh remote matrix proves the auto-candidate
 WebRTC path and produces longer two-host UDP performance evidence, or until the
 asymmetry failures have been explained and documented with diagnostics.
