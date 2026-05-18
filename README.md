@@ -101,8 +101,8 @@ link-local host candidates for privacy.
 
 For explicit two-process signaling, `-mdns disabled -raw-candidates` enables
 the reusable `apple-pion/icepolicy` host-candidate policy. It uses a synthetic
-non-link-local host candidate inside Pion, strips candidates from the SDP, and
-publishes the selected interface IP as explicit `ICECandidateInit` records.
+non-link-local host candidate inside Pion and publishes the selected interface
+IP as explicit `ICECandidateInit` records alongside the unmodified SDP.
 This keeps the demo no-fork while making AWDL link-local ICE testable without
 SDP rewriting.
 
