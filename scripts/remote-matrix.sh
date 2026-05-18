@@ -52,6 +52,85 @@ run_diag() {
 	"$@" 2>&1 || printf 'command failed exit=%d\n' "$?"
 }
 
+addr_host() {
+	local addr=$1
+	if [[ $addr == \[*\]:* ]]; then
+		addr=${addr#\[}
+		printf '%s\n' "${addr%\]:*}"
+		return
+	fi
+	printf '%s\n' "${addr%:*}"
+}
+
+addr_port() {
+	local addr=$1
+	if [[ $addr == \[*\]:* ]]; then
+		printf '%s\n' "${addr##*\]:}"
+		return
+	fi
+	printf '%s\n' "${addr##*:}"
+}
+
+diagnose_local_udp_endpoint() {
+	local label=$1
+	local peer=$2
+	local host port
+	host=$(addr_host "$peer")
+	port=$(addr_port "$peer")
+	printf '## %s local UDP diagnostics\n' "$label"
+	printf 'peer=%s host=%s port=%s\n' "$peer" "$host" "$port"
+	if [[ $host == *:* ]]; then
+		run_diag route -n get -inet6 "$host"
+	else
+		run_diag route -n get "$host"
+	fi
+	if command -v lsof >/dev/null 2>&1; then
+		run_diag lsof -nP -iUDP:"$port"
+	fi
+	run_diag sh -c "netstat -anv -p udp | grep -E '(^|[.:])${port}([[:space:]]|$)'"
+}
+
+diagnose_remote_udp_endpoint() {
+	local label=$1
+	local peer=$2
+	local host port route_cmd
+	host=$(addr_host "$peer")
+	port=$(addr_port "$peer")
+	if [[ $host == *:* ]]; then
+		route_cmd="route -n get -inet6 $(sq "$host")"
+	else
+		route_cmd="route -n get $(sq "$host")"
+	fi
+	remote "printf '## %s remote UDP diagnostics\n' $(sq "$label"); printf 'peer=%s host=%s port=%s\n' $(sq "$peer") $(sq "$host") $(sq "$port"); date -u; $route_cmd || true; if command -v lsof >/dev/null 2>&1; then lsof -nP -iUDP:$(sq "$port") || true; fi; netstat -anv -p udp | grep -E '(^|[.:])$(sq "$port")([[:space:]]|$)' || true"
+}
+
+diagnose_local_udp_path() {
+	local label=$1
+	local peer=$2
+	local host
+	host=$(addr_host "$peer")
+	printf '## %s local UDP route\n' "$label"
+	printf 'peer=%s host=%s\n' "$peer" "$host"
+	if [[ $host == *:* ]]; then
+		run_diag route -n get -inet6 "$host"
+	else
+		run_diag route -n get "$host"
+	fi
+}
+
+diagnose_remote_udp_path() {
+	local label=$1
+	local peer=$2
+	local host route_cmd
+	host=$(addr_host "$peer")
+	if [[ $host == *:* ]]; then
+		route_cmd="route -n get -inet6 $(sq "$host")"
+	else
+		route_cmd="route -n get $(sq "$host")"
+	fi
+	remote "printf '## %s remote UDP route\n' $(sq "$label"); printf 'peer=%s host=%s\n' $(sq "$peer") $(sq "$host"); date -u; $route_cmd || true"
+}
+
 diagnose_local_reachability() {
 	printf '## local reachability diagnostics\n'
 	printf 'ssh_host=%s\n' "$ssh_host"
@@ -231,6 +310,8 @@ run_local_listener_then_remote_sender() {
 		rm -f "$log"
 		return 1
 	fi
+	diagnose_local_udp_endpoint "$profile local perf listener" "$peer"
+	diagnose_remote_udp_path "$profile remote perf sender" "$peer"
 	local rc=0
 	remote_send "$profile" "$peer" || rc=$?
 	wait "$listener_pid" || rc=$?
@@ -259,6 +340,8 @@ run_local_listener_then_remote_latency() {
 		rm -f "$log"
 		return 1
 	fi
+	diagnose_local_udp_endpoint "$profile local latency listener" "$peer"
+	diagnose_remote_udp_path "$profile remote latency sender" "$peer"
 	local rc=0
 	remote_latency_send "$profile" "$peer" || rc=$?
 	wait "$listener_pid" || rc=$?
@@ -285,6 +368,8 @@ run_remote_listener_then_local_sender() {
 		rm -f "$log"
 		return 1
 	fi
+	diagnose_remote_udp_endpoint "$profile remote perf listener" "$peer"
+	diagnose_local_udp_path "$profile local perf sender" "$peer"
 	local rc=0
 	local_send "$profile" "$peer" || rc=$?
 	wait "$listener_pid" || rc=$?
@@ -311,6 +396,8 @@ run_remote_listener_then_local_latency() {
 		rm -f "$log"
 		return 1
 	fi
+	diagnose_remote_udp_endpoint "$profile remote latency listener" "$peer"
+	diagnose_local_udp_path "$profile local latency sender" "$peer"
 	local rc=0
 	local_latency_send "$profile" "$peer" || rc=$?
 	wait "$listener_pid" || rc=$?
@@ -354,6 +441,10 @@ run_bidirectional_perf() {
 		rm -f "$local_log" "$remote_log" "$local_send_log" "$remote_send_log"
 		return 1
 	fi
+	diagnose_local_udp_endpoint "$profile bidirectional local listener" "$local_peer"
+	diagnose_remote_udp_endpoint "$profile bidirectional remote listener" "$remote_peer"
+	diagnose_local_udp_path "$profile bidirectional local sender" "$remote_peer"
+	diagnose_remote_udp_path "$profile bidirectional remote sender" "$local_peer"
 	local_send "$profile" "$remote_peer" >"$local_send_log" 2>&1 &
 	local local_sender_pid=$!
 	remote_send "$profile" "$local_peer" >"$remote_send_log" 2>&1 &
@@ -382,6 +473,8 @@ run_local_callback_then_remote_request() {
 		rm -f "$log"
 		return 1
 	fi
+	diagnose_local_udp_endpoint "$profile local callback listener" "$peer"
+	diagnose_remote_udp_path "$profile remote callback request" "$peer"
 	local rc=0
 	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-callback-request -peer $(sq "$peer") -message $(sq "$message") -timeout $(sq "$timeout")" || rc=$?
 	wait "$listener_pid" || rc=$?
@@ -404,6 +497,8 @@ run_remote_callback_then_local_request() {
 		rm -f "$log"
 		return 1
 	fi
+	diagnose_remote_udp_endpoint "$profile remote callback listener" "$peer"
+	diagnose_local_udp_path "$profile local callback request" "$peer"
 	local rc=0
 	run "$local_bin" -profile "$profile" -backend network -nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries" -mode udp-callback-request -peer "$peer" -message "$message" -timeout "$timeout" || rc=$?
 	wait "$listener_pid" || rc=$?
