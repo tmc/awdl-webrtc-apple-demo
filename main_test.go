@@ -161,6 +161,7 @@ func TestUDPPerfRecordForTrial(t *testing.T) {
 		Count:   3,
 		Size:    100,
 		Warmup:  1,
+		Window:  2,
 		Lost:    1,
 		Elapsed: 10 * time.Millisecond,
 		RTT: []time.Duration{
@@ -174,6 +175,9 @@ func TestUDPPerfRecordForTrial(t *testing.T) {
 	}
 	if record.Datagrams != 2 || record.Lost != 1 || record.TransferBytes != 400 {
 		t.Fatalf("record counts = %#v", record)
+	}
+	if record.Window != 2 {
+		t.Fatalf("record window = %d, want 2", record.Window)
 	}
 	if record.LossPercent != 100.0/3.0 {
 		t.Fatalf("loss percent = %v", record.LossPercent)
@@ -201,7 +205,7 @@ func TestUDPPerfListenRecord(t *testing.T) {
 
 func TestRunUDPEchoPerfCountsReadTimeoutsAsLoss(t *testing.T) {
 	conn := &timeoutPacketConn{}
-	result, err := runUDPEchoPerf(context.Background(), conn, &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9}, 3, 16, 0, time.Millisecond)
+	result, err := runUDPEchoPerf(context.Background(), conn, &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9}, 3, 16, 0, 1, time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,6 +214,23 @@ func TestRunUDPEchoPerfCountsReadTimeoutsAsLoss(t *testing.T) {
 	}
 	if conn.writes != 3 {
 		t.Fatalf("writes = %d, want 3", conn.writes)
+	}
+}
+
+func TestRunUDPEchoPerfWindowPipelines(t *testing.T) {
+	conn := &echoPacketConn{addr: &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9}}
+	result, err := runUDPEchoPerf(context.Background(), conn, conn.addr, 5, 16, 0, 3, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Lost != 0 || len(result.RTT) != 5 || result.Window != 3 {
+		t.Fatalf("result lost=%d rtt=%d window=%d, want 0, 5, 3", result.Lost, len(result.RTT), result.Window)
+	}
+	if conn.writes != 5 {
+		t.Fatalf("writes = %d, want 5", conn.writes)
+	}
+	if conn.maxQueued != 3 {
+		t.Fatalf("max queued = %d, want 3", conn.maxQueued)
 	}
 }
 
@@ -240,6 +261,37 @@ func (c *timeoutPacketConn) LocalAddr() net.Addr              { return &net.UDPA
 func (c *timeoutPacketConn) SetDeadline(time.Time) error      { return nil }
 func (c *timeoutPacketConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *timeoutPacketConn) SetWriteDeadline(time.Time) error { return nil }
+
+type echoPacketConn struct {
+	packets   [][]byte
+	addr      net.Addr
+	writes    int
+	maxQueued int
+}
+
+func (c *echoPacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
+	if len(c.packets) == 0 {
+		return 0, nil, timeoutError{}
+	}
+	packet := c.packets[0]
+	c.packets = c.packets[1:]
+	return copy(b, packet), c.addr, nil
+}
+
+func (c *echoPacketConn) WriteTo(b []byte, _ net.Addr) (int, error) {
+	c.writes++
+	c.packets = append(c.packets, append([]byte(nil), b...))
+	if len(c.packets) > c.maxQueued {
+		c.maxQueued = len(c.packets)
+	}
+	return len(b), nil
+}
+
+func (c *echoPacketConn) Close() error                     { return nil }
+func (c *echoPacketConn) LocalAddr() net.Addr              { return &net.UDPAddr{} }
+func (c *echoPacketConn) SetDeadline(time.Time) error      { return nil }
+func (c *echoPacketConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *echoPacketConn) SetWriteDeadline(time.Time) error { return nil }
 
 type timeoutError struct{}
 
