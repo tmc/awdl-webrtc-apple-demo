@@ -9,7 +9,7 @@ import (
 
 	"github.com/pion/transport/v4"
 	"github.com/pion/transport/v4/stdnet"
-	"github.com/tmc/awdl-webrtc-apple-demo/nwpacket"
+	"github.com/tmc/apple/network/nwpacket"
 )
 
 // Config configures a Pion transport.Net backed by Network.framework UDP

@@ -23,10 +23,10 @@ import (
 	piontransport "github.com/pion/transport/v4"
 	"github.com/pion/webrtc/v4"
 	applenetwork "github.com/tmc/apple/network"
+	"github.com/tmc/apple/network/nwpacket"
 	"github.com/tmc/apple/objc"
 	"github.com/tmc/apple/objectivec"
 	"github.com/tmc/awdl-webrtc-apple-demo/internal/icepolicy"
-	"github.com/tmc/awdl-webrtc-apple-demo/nwpacket"
 	"github.com/tmc/awdl-webrtc-apple-demo/nwtransport"
 	"golang.org/x/sys/unix"
 )
