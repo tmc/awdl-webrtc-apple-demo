@@ -147,10 +147,11 @@ The script builds a temporary local binary, copies it to `REMOTE_BIN` on the
 peer, then runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus
 Network.framework UDP perf, latency, and callback probes in both directions.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
-`STREAMS`, `TIMEOUT`, `LOCAL_BIN`, or `REMOTE_BIN` to narrow or lengthen a run.
-When `DURATION` is set, sender trials run for that duration instead of a fixed
-datagram count and listeners run until their timeout. Set `REQUIRE_PATHS=1` to
-add `-require-path-interface` and `-forbid-loopback-path` to sender runs; LAN
+`STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `NW_CONNECT_TIMEOUT`, or
+`NW_CONNECT_RETRIES` to narrow, lengthen, or tune a run. When `DURATION` is set,
+sender trials run for that duration instead of a fixed datagram count and
+listeners run until their timeout. Set `REQUIRE_PATHS=1` to add
+`-require-path-interface` and `-forbid-loopback-path` to sender runs; LAN
 defaults to `en0`, AWDL defaults to `awdl0`, and Thunderbolt uses
 `THUNDERBOLT_PATH_INTERFACE` when set.
 
@@ -186,7 +187,9 @@ datagram, loss, and RTT columns; `udp-latency-send` talks to a normal
 per trial plus an aggregate summary or listener summary. Network.framework
 connections include observed path records in JSON when available. Use
 `-require-path-interface awdl0` or `-forbid-loopback-path` to fail a perf or
-latency run when the observed path is inconsistent with the requested link.
+latency run when the observed path is inconsistent with the requested link. Use
+`-nw-connect-timeout` and `-nw-connect-retries` to tune outbound
+Network.framework readiness retry during asymmetric link tests.
 Echo timeouts are counted as lost datagrams after `-packet-timeout`, while
 write and corrupt-reply errors still fail the run. This is a smoke benchmark,
 not a replacement for `iperf3`.
