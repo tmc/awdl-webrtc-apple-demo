@@ -13,18 +13,23 @@ func TestParseRows(t *testing.T) {
 		"## lan remote-to-local UDP perf",
 		`{"kind":"udp_perf","trial":1,"trials":3,"datagrams":20,"lost":0,"loss_percent":0,"transfer_bytes":48000,"bitrate_bps":1200000,"elapsed_ns":320000000,"rtt_avg_ns":1000000,"rtt_p95_ns":2000000,"paths":[{"status":"NWPathStatusSatisfied","interfaces":[{"name":"en0","type":"NWInterfaceTypeWifi"}]}]}`,
 		"not json",
+		"FAIL: lan local-to-remote UDP perf exit=1",
 		"## matrix summary",
+		"FAIL: lan local-to-remote UDP perf exit=1",
 		`{"kind":"udp_perf_listen","datagrams":18,"expected":20,"lost":2,"loss_percent":10}`,
 	}, "\n"))
 	rows, err := parseRows(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 {
-		t.Fatalf("rows = %d, want 2", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(rows))
 	}
 	if rows[0].Section != "lan remote-to-local UDP perf" || rows[0].Record.Kind != "udp_perf" {
 		t.Fatalf("first row = %#v", rows[0])
+	}
+	if rows[1].Section != "lan remote-to-local UDP perf" || rows[1].Failure != "lan local-to-remote UDP perf exit=1" {
+		t.Fatalf("failure row = %#v", rows[1])
 	}
 	if got := formatPaths(rows[0].Record.Paths); got != "NWPathStatusSatisfied en0:NWInterfaceTypeWifi" {
 		t.Fatalf("paths = %q", got)
@@ -49,11 +54,15 @@ func TestPrintTable(t *testing.T) {
 				RTTP95NS:      2000,
 			},
 		},
+		{
+			Section: "matrix summary",
+			Failure: "awdl local-to-remote UDP perf exit=1",
+		},
 	}
 	var out bytes.Buffer
 	printTable(&out, rows)
 	got := out.String()
-	for _, want := range []string{"| Section | Kind |", "lan \\| section", "2.00 KiB", "2.00 Mbps", "25.00%"} {
+	for _, want := range []string{"| Section | Kind |", "lan \\| section", "2.00 KiB", "2.00 Mbps", "25.00%", "| matrix summary | failure |", "awdl local-to-remote UDP perf exit=1"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("table missing %q:\n%s", want, got)
 		}

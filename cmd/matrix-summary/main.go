@@ -41,6 +41,7 @@ type interfaceRecord struct {
 type tableRow struct {
 	Section string
 	Record  resultRecord
+	Failure string
 }
 
 func main() {
@@ -73,6 +74,7 @@ func run(args []string, out io.Writer) error {
 
 func parseRows(in io.Reader) ([]tableRow, error) {
 	var rows []tableRow
+	seenFailures := make(map[string]bool)
 	section := ""
 	scanner := bufio.NewScanner(in)
 	buf := make([]byte, 0, 64*1024)
@@ -81,6 +83,14 @@ func parseRows(in io.Reader) ([]tableRow, error) {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "## ") {
 			section = strings.TrimSpace(strings.TrimPrefix(line, "## "))
+			continue
+		}
+		if strings.HasPrefix(line, "FAIL: ") {
+			failure := strings.TrimSpace(strings.TrimPrefix(line, "FAIL: "))
+			if !seenFailures[failure] {
+				rows = append(rows, tableRow{Section: section, Failure: failure})
+				seenFailures[failure] = true
+			}
 			continue
 		}
 		if !strings.HasPrefix(line, "{") {
@@ -105,6 +115,13 @@ func printTable(out io.Writer, rows []tableRow) {
 	fmt.Fprintln(out, "| Section | Kind | Trial | Datagrams | Lost | Loss | Transfer | Bitrate | Elapsed | RTT avg | RTT p95 | Path |")
 	fmt.Fprintln(out, "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |")
 	for _, row := range rows {
+		if row.Failure != "" {
+			fmt.Fprintf(out, "| %s | failure | - | - | - | - | - | - | - | - | - | %s |\n",
+				escapeCell(row.Section),
+				escapeCell(row.Failure),
+			)
+			continue
+		}
 		record := row.Record
 		fmt.Fprintf(out, "| %s | %s | %s | %d%s | %d | %.2f%% | %s | %s | %s | %s | %s | %s |\n",
 			escapeCell(row.Section),
