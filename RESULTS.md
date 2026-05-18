@@ -53,6 +53,7 @@ Scope terms:
 | Local Thunderbolt default | With `bridge0` addressless, `go run . -profile thunderbolt -backend network -mode check -timeout 3s` selected `en1` at `172.31.253.1`. |
 | Local Thunderbolt gather | `go run . -profile thunderbolt -backend network -mode gather -timeout 5s` gathered 2 mDNS candidates from an `en1` Network.framework UDP mux. |
 | Remote SSH | `ssh -o ConnectTimeout=5 -o BatchMode=yes tmc2@10.0.18.249 ...` timed out, so fresh two-host Thunderbolt/AWDL/LAN reruns are gated on remote reachability. |
+| Remote diagnostics | `RUN_REMOTE=0 PROFILES=lan OUTPUT=/tmp/awdl-webrtc-diagnostics-smoke.txt scripts/remote-diagnostics.sh` | Local smoke captured hostname, OS, `ifconfig`, IPv4/IPv6 routes, route-to-peer, `scutil --nwi`, hardware ports, and UDP sockets. With `RUN_REMOTE=1`, the same script collects the remote side over SSH before the productization matrix. |
 
 ## Host Matrix
 
@@ -69,7 +70,7 @@ Scope terms:
 | Productized packages | In `tmc/apple`: `go test ./x/network/nwpacket`; in `tmc/apple-pion`: `go test ./...` | Promoted `nwpacket`, `nwtransport`, and `icepolicy` tests pass. |
 | Network backend build pin | `go list -m -f '{{.Path}} {{.Version}} {{.Replace.Path}}' github.com/tmc/apple github.com/tmc/apple-pion` | `github.com/tmc/apple v0.6.7`; `github.com/tmc/apple-pion v0.0.0 ../apple-pion`. |
 | Release preflight | `scripts/release-preflight.sh` | Local gates and package availability pass; preflight currently fails because the demo and `apple-pion` have no remotes and the demo still uses a local `replace` for unreleased `apple-pion`. |
-| Remote productization matrix | `SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh` | Builds and copies the demo, then runs LAN/Thunderbolt/AWDL `-pion-net` WebRTC plus Network.framework UDP perf in both directions. `NW_CONNECT_TIMEOUT` and `NW_CONNECT_RETRIES` tune Network.framework readiness retry for every local and remote demo command. Currently blocked because SSH to `tmc2@10.0.18.249` times out. |
+| Remote productization matrix | `SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh` | Builds and copies the demo, then runs LAN/Thunderbolt/AWDL `-pion-net` WebRTC plus Network.framework UDP perf in both directions. `scripts/remote-diagnostics.sh` captures route/interface state before the run; `NW_CONNECT_TIMEOUT` and `NW_CONNECT_RETRIES` tune Network.framework readiness retry for every local and remote demo command. Currently blocked because SSH to `tmc2@10.0.18.249` times out. |
 | Network LAN gather | `go run . -profile lan -backend network -mode gather -timeout 8s` | Two mDNS host candidates from an `en0` Network.framework UDP mux. |
 | Pion-native LAN gather | `AWDL_DEMO_NETWORK_TRACE=1 go run . -profile lan -backend network -pion-net -mode gather -timeout 12s` | Ten mDNS host candidates; trace showed Network.framework listeners for each selected `en0` address. |
 | Pion-native LAN pair | `go run . -profile lan -backend network -pion-net -mode pair -timeout 15s` | Same-host datachannel opened and exchanged payload over `en0` through Pion `transport.Net`. |

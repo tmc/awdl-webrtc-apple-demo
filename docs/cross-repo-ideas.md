@@ -18,6 +18,7 @@ not released API.
 | Add callback-style reverse probes | WeightShare `MeasureAWDLSpeed` starts a temporary callback listener, sends the callback service name to the peer, and has the peer connect back to deliver data. | Use the added `udp-callback-listen` and `udp-callback-request` modes to make the peer send one datagram back to a temporary callback address. This should isolate listener/firewall/path issues behind the LAN/Thunderbolt/AWDL UDP asymmetry once the second Mac is reachable. |
 | Broaden performance modes | Grove perftest has message size, warmup, iterations, duration mode, multi-stream/full-duplex mode, ping-pong latency, CPU/mem profiles, and JSON including path data. WeightShare transfers large chunks and prints path names with throughput. | Keep the current iperf-like UDP output, use the added `-duration`, `-streams`, `udp-latency`, and path JSON modes for longer samples. |
 | Handle transient Network.framework waiting states | Grove's `dialEndpoint` retries until a deadline and treats `NWConnectionStateWaiting` with a grace timer instead of immediately failing. | `tmc/apple v0.6.7` adds `nwpacket.Config.ConnectTimeout` and `ConnectRetries`; this demo uses a 2s readiness timeout with 2 outbound connection retries for both raw UDP and Pion `transport.Net` PacketConns, with `-nw-connect-timeout`, `-nw-connect-retries`, `NW_CONNECT_TIMEOUT`, and `NW_CONNECT_RETRIES` for remote sweeps. |
+| Capture the route state before perf | Grove and WeightShare debugging both depended on knowing the actual interface and route selected by macOS, not only the requested profile. | `scripts/remote-diagnostics.sh` captures local and remote `ifconfig`, IPv4/IPv6 route tables, route-to-peer output, `scutil --nwi`, hardware ports, and UDP sockets before rerunning the matrix. |
 
 ## Discovery Ideas
 
@@ -80,11 +81,12 @@ inconsistent with the requested profile.
 
 ## Suggested Order
 
-1. Run `REQUIRE_PATHS=1` remote matrix once the second Mac is reachable.
-2. Validate whether `tmc/apple v0.6.7` readiness retries clear the old reverse
+1. Run `scripts/remote-diagnostics.sh` once the second Mac is reachable.
+2. Run `REQUIRE_PATHS=1` remote matrix.
+3. Validate whether `tmc/apple v0.6.7` readiness retries clear the old reverse
    AWDL/Thunderbolt timeout.
-3. Validate fixed-duration, multi-stream, and latency-only runs remotely.
-4. Validate callback-style reverse probes on the second Mac to isolate the
+4. Validate fixed-duration, multi-stream, and latency-only runs remotely.
+5. Validate callback-style reverse probes on the second Mac to isolate the
    listener asymmetry.
-5. Add Bonjour discovery/signaling as a second control plane after SSH-based
+6. Add Bonjour discovery/signaling as a second control plane after SSH-based
    validation is green again.

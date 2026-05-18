@@ -143,6 +143,16 @@ To rerun the two-host productization matrix after the peer is reachable, use:
 SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh
 ```
 
+Before the matrix, capture the interface and route state from both Macs:
+
+```sh
+SSH_TARGET=tmc2@10.0.18.249 \
+  THUNDERBOLT_PEER=169.254.88.35 \
+  AWDL_PEER='fe80::9477:6dff:fe11:6a55%awdl0' \
+  OUTPUT=/tmp/awdl-webrtc-diagnostics.txt \
+  scripts/remote-diagnostics.sh
+```
+
 The script builds a temporary local binary, copies it to `REMOTE_BIN` on the
 peer, then runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus
 Network.framework UDP perf, latency, and callback probes in both directions.
