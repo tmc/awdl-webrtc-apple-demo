@@ -168,6 +168,9 @@ runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus Network.framework UDP
 perf, simultaneous bidirectional perf, latency, and callback probes. After
 setup, per-profile probes continue after failures and end with a matrix summary
 so one asymmetric UDP direction does not hide later evidence. The
+UDP probes record listener-side route, `lsof`, and `netstat` output for the
+printed listener host/port plus sender-side route checks before sending, so
+zero-datagram failures have socket and route context in the transcript. The
 `cmd/matrix-summary` command reads the saved transcript and renders the JSON
 perf/latency records as a compact Markdown table.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
