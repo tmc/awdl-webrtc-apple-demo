@@ -1296,15 +1296,23 @@ func newLinkPacketConn(profile linkProfile, iface linkInterface, backend udpBack
 
 func newGoLinkPacketConn(iface linkInterface, networkName string) (*linkPacketConn, error) {
 	if networkName == "" {
-		bindIf := shouldBindUDPToInterface(iface, "")
-		conn, ip, networkName, bound, err := listenUDPOnInterface(iface, bindIf)
+		ip, resolvedNetwork, zone, err := listenIP(iface)
+		if err != nil {
+			return nil, err
+		}
+		bindIf := shouldBindUDPToInterface(iface, resolvedNetwork, ip)
+		conn, ip, networkName, bound, err := listenUDP(iface, ip, resolvedNetwork, zone, bindIf)
 		if err != nil {
 			return nil, err
 		}
 		return &linkPacketConn{conn: conn, ip: ip, network: networkName, bound: bound, backend: udpBackendGo}, nil
 	}
-	bindIf := shouldBindUDPToInterface(iface, networkName)
-	conn, ip, bound, err := listenUDPOnInterfaceNetwork(iface, networkName, bindIf)
+	ip, zone, err := listenIPForNetwork(iface, networkName)
+	if err != nil {
+		return nil, err
+	}
+	bindIf := shouldBindUDPToInterface(iface, networkName, ip)
+	conn, ip, _, bound, err := listenUDP(iface, ip, networkName, zone, bindIf)
 	if err != nil {
 		return nil, err
 	}
@@ -1344,23 +1352,6 @@ func networkTracef(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "nwtrace: "+format+"\n", args...)
 }
 
-func listenUDPOnInterface(iface linkInterface, bindIf bool) (*net.UDPConn, net.IP, string, bool, error) {
-	ip, networkName, zone, err := listenIP(iface)
-	if err != nil {
-		return nil, nil, "", false, err
-	}
-	return listenUDP(iface, ip, networkName, zone, bindIf)
-}
-
-func listenUDPOnInterfaceNetwork(iface linkInterface, networkName string, bindIf bool) (*net.UDPConn, net.IP, bool, error) {
-	ip, zone, err := listenIPForNetwork(iface, networkName)
-	if err != nil {
-		return nil, nil, false, err
-	}
-	conn, ip, _, bound, err := listenUDP(iface, ip, networkName, zone, bindIf)
-	return conn, ip, bound, err
-}
-
 func listenUDP(iface linkInterface, ip net.IP, networkName, zone string, bindIf bool) (*net.UDPConn, net.IP, string, bool, error) {
 	conn, err := net.ListenUDP(networkName, &net.UDPAddr{IP: ip, Port: 0, Zone: zone})
 	if err != nil {
@@ -1375,11 +1366,14 @@ func listenUDP(iface linkInterface, ip net.IP, networkName, zone string, bindIf 
 	return conn, ip, networkName, bindIf, nil
 }
 
-func shouldBindUDPToInterface(iface linkInterface, networkName string) bool {
+func shouldBindUDPToInterface(iface linkInterface, networkName string, ip net.IP) bool {
 	if strings.HasPrefix(iface.Name, "awdl") {
 		return true
 	}
-	return networkName == "udp6"
+	if networkName == "udp6" {
+		return true
+	}
+	return ip != nil && ip.IsLinkLocalUnicast()
 }
 
 func boundIfString(iface linkInterface, bound bool) string {
