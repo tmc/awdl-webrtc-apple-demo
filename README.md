@@ -156,12 +156,12 @@ SSH_TARGET=tmc2@10.0.18.249 \
   scripts/remote-diagnostics.sh
 ```
 
-The script first checks SSH reachability, then builds a temporary local binary,
-copies it to `REMOTE_BIN` on the peer, and runs LAN, Thunderbolt, and AWDL
-`-pion-net` WebRTC plus
-Network.framework UDP perf, latency, and callback probes in both directions.
-After setup, per-profile probes continue after failures and end with a matrix
-summary so one asymmetric UDP direction does not hide later evidence.
+The script records local reachability diagnostics for `SSH_TARGET`, checks SSH,
+then builds a temporary local binary, copies it to `REMOTE_BIN` on the peer, and
+runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus Network.framework UDP
+perf, latency, and callback probes in both directions. After setup, per-profile
+probes continue after failures and end with a matrix summary so one asymmetric
+UDP direction does not hide later evidence.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `OUTPUT`,
 `NW_CONNECT_TIMEOUT`, or `NW_CONNECT_RETRIES` to narrow, lengthen, save, or tune
@@ -169,7 +169,8 @@ a run. When `DURATION` is set, sender trials run for that duration instead of a
 fixed datagram count and listeners run until their timeout. Set
 `REQUIRE_PATHS=1` to add `-require-path-interface` and `-forbid-loopback-path`
 to sender runs; LAN defaults to `en0`, AWDL defaults to `awdl0`, and
-Thunderbolt uses `THUNDERBOLT_PATH_INTERFACE` when set.
+Thunderbolt uses `THUNDERBOLT_PATH_INTERFACE` when set. Set `SSH_HOST` when the
+address to probe differs from the SSH target host string.
 
 Before cutting releases or removing local module replaces, run:
 

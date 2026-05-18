@@ -12,7 +12,7 @@ do not complete requirements that need a fresh two-host run.
 | Published modules | PASS: the demo resolves `github.com/tmc/apple v0.6.7` and `github.com/tmc/apple-pion v0.1.0` from the module cache with no local replace. |
 | Published repos | PASS: demo, `apple-pion`, and `apple` HEADs are published at `origin/main`; `apple-pion` is tagged `v0.1.0`. |
 | Remote reachability | BLOCKED: `ssh -o ConnectTimeout=5 -o BatchMode=yes tmc2@10.0.18.249 true` times out. |
-| Remote matrix | BLOCKED: `scripts/remote-matrix.sh` now checks SSH reachability first and exits before building/copying while `tmc2` is unreachable. Once setup succeeds, per-profile probes continue after failures and end with a matrix summary. |
+| Remote matrix | BLOCKED: `scripts/remote-matrix.sh` now records local route, ping, TCP/22, `scutil --nwi`, and interface-list diagnostics before checking SSH reachability; it exits before building/copying while `tmc2` is unreachable. Once setup succeeds, per-profile probes continue after failures and end with a matrix summary. |
 
 ## Requirement Checklist
 
@@ -20,7 +20,7 @@ do not complete requirements that need a fresh two-host run.
 | --- | --- | --- | --- |
 | Full Pion-native backend | `github.com/tmc/apple-pion/nwtransport` implements Pion `transport.Net`; demo uses `-pion-net`; `RESULTS.md` records LAN, Thunderbolt, and AWDL historical datachannel success. | PASS | None for the packaged UDP transport backend. Broader TCP/TURN/STUN Network.framework ownership is explicitly out of this demo slice. |
 | Durable AWDL/link-local candidates | `github.com/tmc/apple-pion/icepolicy`; demo keeps SDP unmodified and publishes explicit `ICECandidateInit` records; tests cover raw candidate extraction. | PARTIAL | Re-run `-pion-net -mdns disabled -raw-candidates offer-ssh` on LAN, Thunderbolt, and AWDL once `tmc2` is reachable. |
-| Direction/asymmetry cleanup | `udp-callback-listen`, `udp-callback-request`, path policy checks, `nwpacket` readiness retries, and `remote-diagnostics.sh` are implemented. | PARTIAL | Run `SSH_TARGET=tmc2@10.0.18.249 scripts/remote-diagnostics.sh`, then `REQUIRE_PATHS=1 SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh`; inspect callback and local-to-remote UDP sections. |
+| Direction/asymmetry cleanup | `udp-callback-listen`, `udp-callback-request`, path policy checks, `nwpacket` readiness retries, `remote-diagnostics.sh`, and matrix-local reachability diagnostics are implemented. | PARTIAL | Run `SSH_TARGET=tmc2@10.0.18.249 scripts/remote-diagnostics.sh`, then `REQUIRE_PATHS=1 SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh`; inspect callback and local-to-remote UDP sections. |
 | Performance hardening | `udp-perf` supports `-duration`, `-trials`, `-window`, `-streams`, `-packet-timeout`, loss columns, JSON, latency mode, and Network.framework path records. | PARTIAL | Run longer two-host matrix samples with `DURATION`, `TRIALS`, `WINDOW`, and `STREAMS` after remote reachability returns. |
 | Reusable package split | `github.com/tmc/apple/x/network/nwpacket v0.6.7`; `github.com/tmc/apple-pion v0.1.0`; demo has no local replaces. | PASS | None. |
 | Repo hygiene | Demo and `apple-pion` worktrees are clean; owned `tmc/apple/x/network/nwpacket` is clean; release preflight passes. | PASS | Preserve unrelated dirty generated/private files in `tmc/apple`; they are outside this slice. |
