@@ -3,6 +3,7 @@
 package nwpacket
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -71,6 +72,17 @@ type nwPacketConn struct {
 
 // ListenPacket creates a Network.framework-backed net.PacketConn.
 func ListenPacket(config Config) (net.PacketConn, error) {
+	return ListenPacketContext(context.Background(), config)
+}
+
+// ListenPacketContext creates a Network.framework-backed net.PacketConn.
+//
+// The context bounds listener startup. After startup succeeds, use deadlines
+// and Close to control packet I/O.
+func ListenPacketContext(ctx context.Context, config Config) (net.PacketConn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if config.LocalAddr == nil {
 		return nil, errors.New("missing local address")
 	}
@@ -134,6 +146,9 @@ func ListenPacket(config Config) (net.PacketConn, error) {
 			_ = c.Close()
 			return nil, err
 		}
+	case <-ctx.Done():
+		_ = c.Close()
+		return nil, ctx.Err()
 	case <-time.After(5 * time.Second):
 		_ = c.Close()
 		return nil, errors.New("timed out waiting for nw listener readiness")

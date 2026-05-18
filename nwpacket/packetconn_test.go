@@ -3,6 +3,7 @@
 package nwpacket
 
 import (
+	"context"
 	"errors"
 	"net"
 	"testing"
@@ -69,5 +70,16 @@ func TestTimeoutError(t *testing.T) {
 func TestListenPacketRequiresLocalAddr(t *testing.T) {
 	if _, err := ListenPacket(Config{}); err == nil {
 		t.Fatal("ListenPacket succeeded without LocalAddr")
+	}
+}
+
+func TestListenPacketContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := ListenPacketContext(ctx, Config{
+		LocalAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1")},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ListenPacketContext err = %v, want %v", err, context.Canceled)
 	}
 }

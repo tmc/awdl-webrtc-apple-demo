@@ -3,6 +3,8 @@
 package nwpacket_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 
@@ -22,4 +24,14 @@ func ExampleConfig() {
 	}
 	fmt.Println(cfg.InterfaceName, cfg.IncludePeerToPeer)
 	// Output: awdl0 true
+}
+
+func ExampleListenPacketContext() {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := nwpacket.ListenPacketContext(ctx, nwpacket.Config{
+		LocalAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1")},
+	})
+	fmt.Println(errors.Is(err, context.Canceled))
+	// Output: true
 }
