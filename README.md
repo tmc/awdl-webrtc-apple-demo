@@ -139,11 +139,11 @@ SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh
 
 The script builds a temporary local binary, copies it to `REMOTE_BIN` on the
 peer, then runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus
-Network.framework UDP perf in both directions. Override `PROFILES`, `COUNT`,
-`DURATION`, `WARMUP`, `TRIALS`, `WINDOW`, `TIMEOUT`, `LOCAL_BIN`, or
-`REMOTE_BIN` to narrow or lengthen a run. When `DURATION` is set, sender trials
-run for that duration instead of a fixed datagram count and listeners run until
-their timeout.
+Network.framework UDP perf and callback probes in both directions. Override
+`PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`, `TIMEOUT`,
+`LOCAL_BIN`, or `REMOTE_BIN` to narrow or lengthen a run. When `DURATION` is
+set, sender trials run for that duration instead of a fixed datagram count and
+listeners run until their timeout.
 
 Before cutting releases or removing local module replaces, run:
 
@@ -180,14 +180,21 @@ For a two-host AWDL UDP proof, run the listener on one Mac:
 ```sh
 go run . -profile awdl -backend go -mode udp-listen -timeout 60s
 go run . -profile awdl -backend go -mode udp-perf-listen -timeout 60s
+go run . -profile awdl -backend go -mode udp-callback-listen -timeout 60s
 ```
 
 Then send to the printed scoped address from another Mac:
 
 ```sh
 go run . -profile awdl -backend go -mode udp-send -peer '[fe80::peer%awdl0]:12345' -timeout 10s
+go run . -profile awdl -backend go -mode udp-callback-request -peer '[fe80::peer%awdl0]:12345' -message ping -timeout 10s
 go run . -profile awdl -backend go -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -duration 10s -size 1200 -warmup 5 -trials 3 -window 4 -perf-json -timeout 40s
 ```
+
+The callback probe sends a small JSON request containing a temporary callback
+address. The listener writes one datagram back to that callback address. This is
+meant to isolate whether the request packet reached the listener and whether
+the reverse callback packet can get back.
 
 For Network.framework diagnostics, set:
 
