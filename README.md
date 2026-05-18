@@ -14,8 +14,9 @@ The reusable Network.framework surfaces are:
   adapter, consumed from the sibling `tmc/apple-pion` checkout through the
   temporary `replace github.com/tmc/apple-pion => ../apple-pion`. It routes
   concrete UDP listeners, configured wildcard UDP listeners, and UDP dials
-  through Network.framework, while leaving DNS, TCP, and unconstrained wildcard
-  UDP on Pion's standard network fallback.
+  through Network.framework, while leaving DNS, TCP, unconstrained wildcard
+  UDP, and TURN/STUN helper traffic outside that selected UDP surface on
+  Pion's standard network fallback.
 
 It has three profiles:
 
