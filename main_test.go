@@ -190,6 +190,59 @@ func TestUDPPerfRecordForTrial(t *testing.T) {
 	}
 }
 
+func TestUDPPerfRecordForSummary(t *testing.T) {
+	results := []udpPerfResult{
+		{
+			Count:   3,
+			Size:    100,
+			Warmup:  1,
+			Window:  2,
+			Lost:    1,
+			Elapsed: 10 * time.Millisecond,
+			RTT: []time.Duration{
+				time.Millisecond,
+				3 * time.Millisecond,
+			},
+		},
+		{
+			Count:   3,
+			Size:    100,
+			Warmup:  1,
+			Window:  2,
+			Lost:    0,
+			Elapsed: 20 * time.Millisecond,
+			RTT: []time.Duration{
+				2 * time.Millisecond,
+				4 * time.Millisecond,
+				5 * time.Millisecond,
+			},
+		},
+	}
+	summary := aggregateUDPPerfResults(results)
+	if summary.Count != 6 || summary.Warmup != 2 || summary.Lost != 1 || summary.Elapsed != 30*time.Millisecond {
+		t.Fatalf("summary counts = %#v", summary)
+	}
+	if len(summary.RTT) != 5 || summary.Window != 2 || summary.Size != 100 {
+		t.Fatalf("summary shape = %#v", summary)
+	}
+	record := udpPerfRecordForSummary(summary, len(results))
+	if record.Kind != "udp_perf_summary" || record.Trials != 2 {
+		t.Fatalf("record identity = %#v", record)
+	}
+	if record.Datagrams != 5 || record.Lost != 1 || record.TransferBytes != 1000 {
+		t.Fatalf("record counts = %#v", record)
+	}
+	if record.LossPercent != 100.0/6.0 {
+		t.Fatalf("loss percent = %v", record.LossPercent)
+	}
+	if record.RTTMinNS != int64(time.Millisecond) || record.RTTMaxNS != int64(5*time.Millisecond) {
+		t.Fatalf("rtt bounds = %#v", record)
+	}
+	if _, err := json.Marshal(record); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUDPPerfListenRecord(t *testing.T) {
 	record := udpPerfListenRecord(8, 9600, 2*time.Second, 10)
 	if record.Kind != "udp_perf_listen" || record.Datagrams != 8 || record.Expected != 10 || record.Lost != 2 {

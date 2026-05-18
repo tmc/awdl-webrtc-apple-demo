@@ -939,6 +939,7 @@ func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, back
 	clientAddr := client.LocalAddr()
 	fmt.Printf("udp perf server=%s client=%s network=%s backend=%s server_bound_if=%s client_bound_if=%s window=%d\n",
 		serverAddr, clientAddr, serverLink.network, backend, boundIfString(iface, serverLink.bound), boundIfString(iface, clientLink.bound), window)
+	results := make([]udpPerfResult, 0, trials)
 	for trial := 1; trial <= trials; trial++ {
 		if trials > 1 {
 			fmt.Printf("udp perf trial=%d/%d\n", trial, trials)
@@ -951,10 +952,12 @@ func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, back
 		if jsonOut {
 			printJSON(udpPerfRecordForTrial(result, trial, trials))
 		}
+		results = append(results, result)
 	}
 	if err := <-errc; err != nil {
 		return err
 	}
+	printUDPPerfSummary(results, jsonOut)
 	return nil
 }
 
@@ -1028,6 +1031,7 @@ func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, 
 	}
 	fmt.Printf("udp perf local=%s peer=%s network=%s backend=%s bound_if=%s window=%d\n",
 		conn.LocalAddr(), addr, networkName, link.backend, boundIfString(iface, link.bound), window)
+	results := make([]udpPerfResult, 0, trials)
 	for trial := 1; trial <= trials; trial++ {
 		if trials > 1 {
 			fmt.Printf("udp perf trial=%d/%d\n", trial, trials)
@@ -1040,7 +1044,9 @@ func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, 
 		if jsonOut {
 			printJSON(udpPerfRecordForTrial(result, trial, trials))
 		}
+		results = append(results, result)
 	}
+	printUDPPerfSummary(results, jsonOut)
 	return nil
 }
 
@@ -1268,6 +1274,18 @@ func printUDPPerf(result udpPerfResult) {
 	)
 }
 
+func printUDPPerfSummary(results []udpPerfResult, jsonOut bool) {
+	if len(results) <= 1 {
+		return
+	}
+	result := aggregateUDPPerfResults(results)
+	fmt.Printf("udp perf summary trials=%d\n", len(results))
+	printUDPPerf(result)
+	if jsonOut {
+		printJSON(udpPerfRecordForSummary(result, len(results)))
+	}
+}
+
 func printUDPPerfListen(packets, bytes int64, elapsed time.Duration, expected int64) {
 	lost := int64(0)
 	if expected > packets {
@@ -1310,6 +1328,30 @@ func udpPerfRecordForTrial(result udpPerfResult, trial, trials int) udpPerfRecor
 	record.RTTP50NS = percentileDuration(rtt, 50).Nanoseconds()
 	record.RTTP95NS = percentileDuration(rtt, 95).Nanoseconds()
 	record.RTTMaxNS = rtt[success-1].Nanoseconds()
+	return record
+}
+
+func aggregateUDPPerfResults(results []udpPerfResult) udpPerfResult {
+	if len(results) == 0 {
+		return udpPerfResult{}
+	}
+	out := udpPerfResult{
+		Size:   results[0].Size,
+		Window: results[0].Window,
+	}
+	for _, result := range results {
+		out.Count += result.Count
+		out.Warmup += result.Warmup
+		out.Lost += result.Lost
+		out.Elapsed += result.Elapsed
+		out.RTT = append(out.RTT, result.RTT...)
+	}
+	return out
+}
+
+func udpPerfRecordForSummary(result udpPerfResult, trials int) udpPerfRecord {
+	record := udpPerfRecordForTrial(result, 0, trials)
+	record.Kind = "udp_perf_summary"
 	return record
 }
 
