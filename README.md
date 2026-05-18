@@ -7,7 +7,7 @@ See [RESULTS.md](RESULTS.md) for the current answer/output table.
 
 The reusable Network.framework surfaces are:
 
-- `github.com/tmc/apple/network/nwpacket`: a Network.framework
+- `github.com/tmc/apple/x/network/nwpacket`: a Network.framework
   `net.PacketConn`, consumed from the sibling `tmc/apple` checkout through the
   temporary `replace github.com/tmc/apple => ../apple`.
 - `github.com/tmc/apple-pion/nwtransport`: a small Pion `transport.Net`
@@ -127,11 +127,12 @@ If a cold `udp` run times out, run `gather` first or use the two-host form.
 The `udp-perf` mode runs a small iperf-like request/echo benchmark over the
 same sockets and prints transfer, bitrate, datagram count, loss, and RTT
 summary columns. The `-warmup` packets are omitted from the summary, and
-`-trials` repeats the same run on one connection. Use `-perf-json` to also
-print one JSON result record per trial or listener summary. Echo timeouts are
-counted as lost datagrams after `-packet-timeout`, while write and corrupt-reply
-errors still fail the run. This is a smoke benchmark, not a replacement for
-`iperf3`.
+`-trials` repeats the same run on one connection. `-window` sets the maximum
+number of in-flight echo requests for bounded pipelining; the default `1`
+preserves the serial request/echo behavior. Use `-perf-json` to also print one
+JSON result record per trial or listener summary. Echo timeouts are counted as
+lost datagrams after `-packet-timeout`, while write and corrupt-reply errors
+still fail the run. This is a smoke benchmark, not a replacement for `iperf3`.
 
 For a two-host AWDL UDP proof, run the listener on one Mac:
 
@@ -144,7 +145,7 @@ Then send to the printed scoped address from another Mac:
 
 ```sh
 go run . -profile awdl -backend go -mode udp-send -peer '[fe80::peer%awdl0]:12345' -timeout 10s
-go run . -profile awdl -backend go -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -count 1000 -size 1200 -warmup 5 -timeout 20s
+go run . -profile awdl -backend go -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -count 1000 -size 1200 -warmup 5 -trials 3 -window 4 -perf-json -timeout 20s
 ```
 
 For Network.framework diagnostics, set:
