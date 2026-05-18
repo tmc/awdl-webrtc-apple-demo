@@ -58,8 +58,15 @@ require_head_published() {
 	local remote=${3:-origin}
 	local branch=${4:-main}
 	local head remote_head
+	if ! git -C "$repo" remote get-url "$remote" >/dev/null 2>&1; then
+		fail "$name has no $remote remote"
+		return
+	fi
 	head=$(git -C "$repo" rev-parse HEAD)
-	remote_head=$(git -C "$repo" ls-remote "$remote" "refs/heads/$branch" | awk '{print $1}')
+	if ! remote_head=$(git -C "$repo" ls-remote "$remote" "refs/heads/$branch" | awk '{print $1}'); then
+		fail "$name cannot read $remote/$branch"
+		return
+	fi
 	if [[ -z $remote_head ]]; then
 		fail "$name cannot read $remote/$branch"
 		return
@@ -83,13 +90,17 @@ require_published_module() {
 	local repo=$1
 	local name=$2
 	local module=$3
-	local modcache version dir
+	local modcache version dir replace
 	modcache=$(GOWORK=off go env GOMODCACHE)
 	version=$(GOWORK=off go -C "$repo" list -m -f '{{.Version}}' "$module")
 	dir=$(GOWORK=off go -C "$repo" list -m -f '{{.Dir}}' "$module")
+	replace=$(GOWORK=off go -C "$repo" list -m -f '{{if .Replace}}{{.Replace.Path}}{{end}}' "$module")
 	printf '%s %s version=%s dir=%s\n' "$name" "$module" "$version" "$dir"
 	if [[ -z $version || $version == "<nil>" ]]; then
 		fail "$name uses an unpublished $module version"
+	fi
+	if [[ -n $replace ]]; then
+		fail "$name resolves $module through local replace: $replace"
 	fi
 	case "$dir/" in
 	"$modcache"/*) ;;
@@ -111,6 +122,7 @@ section "package availability"
 run env GOWORK=off go -C "$apple_pion_dir" list ./...
 run env GOWORK=off go -C "$demo_dir" list ./...
 require_published_module "$demo_dir" "awdl-webrtc-apple-demo" "github.com/tmc/apple"
+require_published_module "$demo_dir" "awdl-webrtc-apple-demo" "github.com/tmc/apple-pion"
 require_published_module "$apple_pion_dir" "apple-pion" "github.com/tmc/apple"
 run go -C "$apple_dir" list ./x/network/nwpacket
 
@@ -129,6 +141,8 @@ section "release blockers"
 require_remote "$demo_dir" "awdl-webrtc-apple-demo"
 require_remote "$apple_pion_dir" "apple-pion"
 require_remote "$apple_dir" "apple"
+require_head_published "$demo_dir" "awdl-webrtc-apple-demo"
+require_head_published "$apple_pion_dir" "apple-pion"
 require_head_published "$apple_dir" "apple"
 require_no_replace "$demo_dir" "awdl-webrtc-apple-demo"
 require_no_replace "$apple_pion_dir" "apple-pion"
