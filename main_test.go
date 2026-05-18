@@ -57,6 +57,56 @@ func TestShouldBindUDPToInterface(t *testing.T) {
 	}
 }
 
+func TestDefaultThunderboltInterface(t *testing.T) {
+	tests := []struct {
+		name   string
+		ifaces map[string]linkInterface
+		want   string
+	}{
+		{
+			name: "prefers bridge with address",
+			ifaces: map[string]linkInterface{
+				"bridge0": {Name: "bridge0", IPs: []net.IP{net.ParseIP("169.254.61.91")}},
+				"en1":     {Name: "en1", IPs: []net.IP{net.ParseIP("172.31.253.1")}},
+			},
+			want: "bridge0",
+		},
+		{
+			name: "falls back to member with address",
+			ifaces: map[string]linkInterface{
+				"bridge0": {Name: "bridge0"},
+				"en1":     {Name: "en1", IPs: []net.IP{net.ParseIP("172.31.253.1")}},
+			},
+			want: "en1",
+		},
+		{
+			name: "keeps first existing without address",
+			ifaces: map[string]linkInterface{
+				"bridge0": {Name: "bridge0"},
+				"en1":     {Name: "en1"},
+			},
+			want: "bridge0",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := defaultThunderboltInterface(func(name string) (linkInterface, error) {
+				iface, ok := tt.ifaces[name]
+				if !ok {
+					return linkInterface{}, net.UnknownNetworkError(name)
+				}
+				return iface, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("defaultThunderboltInterface() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUDPPerfRecordForTrial(t *testing.T) {
 	result := udpPerfResult{
 		Count:   3,

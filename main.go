@@ -311,10 +311,25 @@ func defaultInterface(profile linkProfile) (string, error) {
 	if profile.Name != "thunderbolt" {
 		return "", fmt.Errorf("profile %s has no default interface", profile.Name)
 	}
+	return defaultThunderboltInterface(inspectInterface)
+}
+
+func defaultThunderboltInterface(inspect func(string) (linkInterface, error)) (string, error) {
+	var firstExisting string
 	for _, name := range []string{"bridge0", "en1", "en2", "en3"} {
-		if _, err := net.InterfaceByName(name); err == nil {
+		iface, err := inspect(name)
+		if err != nil {
+			continue
+		}
+		if firstExisting == "" {
+			firstExisting = name
+		}
+		if len(iface.IPs) != 0 {
 			return name, nil
 		}
+	}
+	if firstExisting != "" {
+		return firstExisting, nil
 	}
 	return "", errors.New("could not find Thunderbolt Bridge interface; pass -iface explicitly")
 }
