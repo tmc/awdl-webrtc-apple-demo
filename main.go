@@ -25,7 +25,7 @@ import (
 	"github.com/tmc/apple/objc"
 	"github.com/tmc/apple/objectivec"
 	"github.com/tmc/awdl-webrtc-apple-demo/internal/icepolicy"
-	"github.com/tmc/awdl-webrtc-apple-demo/internal/nwpacket"
+	"github.com/tmc/awdl-webrtc-apple-demo/nwpacket"
 	"golang.org/x/sys/unix"
 )
 

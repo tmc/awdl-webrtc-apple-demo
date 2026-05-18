@@ -7,7 +7,7 @@ import (
 	"net"
 
 	applenetwork "github.com/tmc/apple/network"
-	"github.com/tmc/awdl-webrtc-apple-demo/internal/nwpacket"
+	"github.com/tmc/awdl-webrtc-apple-demo/nwpacket"
 )
 
 func ExampleConfig() {
