@@ -468,6 +468,30 @@ func TestRunUDPEchoPerfDuration(t *testing.T) {
 	}
 }
 
+func TestRunUDPPerfListenStopsAfterIdle(t *testing.T) {
+	conn := &listenPacketConn{
+		packets: [][]byte{make([]byte, 16)},
+		addr:    &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9},
+	}
+	result, err := runUDPPerfListen(context.Background(), conn, 0, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Packets != 1 || result.Bytes != 16 {
+		t.Fatalf("result packets=%d bytes=%d, want 1 and 16", result.Packets, result.Bytes)
+	}
+	if conn.writes != 1 {
+		t.Fatalf("writes = %d, want 1", conn.writes)
+	}
+}
+
+func TestRunUDPPerfListenRejectsNegativeIdleTimeout(t *testing.T) {
+	_, err := runUDPPerfListen(context.Background(), &timeoutPacketConn{}, 0, -time.Nanosecond)
+	if err == nil {
+		t.Fatal("runUDPPerfListen accepted negative idle timeout")
+	}
+}
+
 func TestPacketDeadlineUsesEarlierContextDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -526,6 +550,32 @@ func (c *echoPacketConn) LocalAddr() net.Addr              { return &net.UDPAddr
 func (c *echoPacketConn) SetDeadline(time.Time) error      { return nil }
 func (c *echoPacketConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *echoPacketConn) SetWriteDeadline(time.Time) error { return nil }
+
+type listenPacketConn struct {
+	packets [][]byte
+	addr    net.Addr
+	writes  int
+}
+
+func (c *listenPacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
+	if len(c.packets) == 0 {
+		return 0, nil, timeoutError{}
+	}
+	packet := c.packets[0]
+	c.packets = c.packets[1:]
+	return copy(b, packet), c.addr, nil
+}
+
+func (c *listenPacketConn) WriteTo(b []byte, _ net.Addr) (int, error) {
+	c.writes++
+	return len(b), nil
+}
+
+func (c *listenPacketConn) Close() error                     { return nil }
+func (c *listenPacketConn) LocalAddr() net.Addr              { return &net.UDPAddr{} }
+func (c *listenPacketConn) SetDeadline(time.Time) error      { return nil }
+func (c *listenPacketConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *listenPacketConn) SetWriteDeadline(time.Time) error { return nil }
 
 type timeoutError struct{}
 

@@ -20,6 +20,7 @@ message=${MESSAGE:-callback}
 connect_timeout=${CONNECT_TIMEOUT:-5}
 nw_connect_timeout=${NW_CONNECT_TIMEOUT:-2s}
 nw_connect_retries=${NW_CONNECT_RETRIES:-2}
+listen_idle_timeout=${LISTEN_IDLE_TIMEOUT:-2s}
 require_paths=${REQUIRE_PATHS:-0}
 lan_path_interface=${LAN_PATH_INTERFACE:-en0}
 awdl_path_interface=${AWDL_PATH_INTERFACE:-awdl0}
@@ -216,6 +217,7 @@ run_local_listener_then_remote_sender() {
 		args=(-duration "$duration")
 	fi
 	args+=(-nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries")
+	args+=(-listen-idle-timeout "$listen_idle_timeout")
 	local log
 	log=$(mktemp)
 	printf '## %s remote-to-local UDP perf\n' "$profile"
@@ -243,6 +245,7 @@ run_local_listener_then_remote_latency() {
 		args=(-duration "$duration")
 	fi
 	args+=(-nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries")
+	args+=(-listen-idle-timeout "$listen_idle_timeout")
 	local log
 	log=$(mktemp)
 	printf '## %s remote-to-local UDP latency\n' "$profile"
@@ -272,7 +275,7 @@ run_remote_listener_then_local_sender() {
 	local log
 	log=$(mktemp)
 	printf '## %s local-to-remote UDP perf\n' "$profile"
-	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
+	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -listen-idle-timeout $(sq "$listen_idle_timeout") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
 	local listener_pid=$!
 	local peer
 	if ! peer=$(wait_for_peer "$log" "remote $profile"); then
@@ -298,7 +301,7 @@ run_remote_listener_then_local_latency() {
 	local log
 	log=$(mktemp)
 	printf '## %s local-to-remote UDP latency\n' "$profile"
-	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
+	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -listen-idle-timeout $(sq "$listen_idle_timeout") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
 	local listener_pid=$!
 	local peer
 	if ! peer=$(wait_for_peer "$log" "remote latency $profile"); then
@@ -390,6 +393,7 @@ printf 'timeout=%s\n' "$timeout"
 printf 'connect_timeout=%s\n' "$connect_timeout"
 printf 'nw_connect_timeout=%s\n' "$nw_connect_timeout"
 printf 'nw_connect_retries=%s\n' "$nw_connect_retries"
+printf 'listen_idle_timeout=%s\n' "$listen_idle_timeout"
 printf 'require_paths=%s\n' "$require_paths"
 printf 'lan_path_interface=%s\n' "$lan_path_interface"
 printf 'awdl_path_interface=%s\n' "$awdl_path_interface"

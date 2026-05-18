@@ -133,6 +133,7 @@ func main() {
 	window := flag.Int("window", 1, "UDP perf maximum in-flight echo requests")
 	streams := flag.Int("streams", 1, "UDP perf concurrent stream count")
 	packetTimeout := flag.Duration("packet-timeout", time.Second, "UDP perf per-datagram echo timeout")
+	listenIdleTimeout := flag.Duration("listen-idle-timeout", 0, "UDP perf listener idle timeout after first packet when the expected count is unknown")
 	perfJSON := flag.Bool("perf-json", false, "also print UDP perf result records as JSON lines")
 	requirePathInterface := flag.String("require-path-interface", "", "require UDP perf Network.framework path to include this interface")
 	forbidLoopbackPath := flag.Bool("forbid-loopback-path", false, "fail UDP perf if the Network.framework path uses loopback")
@@ -277,7 +278,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			return udpPerfListen(ctx, profile, iface, backend, expected, *perfJSON)
+			return udpPerfListen(ctx, profile, iface, backend, expected, *listenIdleTimeout, *perfJSON)
 		})
 	case "udp-perf-send":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
@@ -1225,7 +1226,7 @@ func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, back
 	return nil
 }
 
-func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, expected int, jsonOut bool) error {
+func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, expected int, idleTimeout time.Duration, jsonOut bool) error {
 	link, err := newLinkPacketConn(profile, iface, backend, "")
 	if err != nil {
 		return err
@@ -1235,36 +1236,53 @@ func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface
 	fmt.Printf("udp perf listen=%s network=%s backend=%s bound_if=%s\n",
 		conn.LocalAddr(), link.network, link.backend, boundIfString(iface, link.bound))
 
+	result, err := runUDPPerfListen(ctx, conn, expected, idleTimeout)
+	if err != nil {
+		return err
+	}
+	printUDPPerfListen(result.Packets, result.Bytes, result.Elapsed, int64(expected))
+	if jsonOut {
+		printJSON(udpPerfListenRecord(result.Packets, result.Bytes, result.Elapsed, int64(expected)))
+	}
+	return nil
+}
+
+type udpPerfListenResult struct {
+	Packets int64
+	Bytes   int64
+	Elapsed time.Duration
+}
+
+func runUDPPerfListen(ctx context.Context, conn net.PacketConn, expected int, idleTimeout time.Duration) (udpPerfListenResult, error) {
+	if idleTimeout < 0 {
+		return udpPerfListenResult{}, errors.New("udp perf -listen-idle-timeout must be non-negative")
+	}
 	var packets, bytes int64
 	start := time.Now()
 	buf := make([]byte, 64*1024)
 	for {
-		_ = conn.SetReadDeadline(deadline(ctx))
+		readDeadline := deadline(ctx)
+		if expected <= 0 && packets > 0 && idleTimeout > 0 {
+			readDeadline = packetDeadline(ctx, idleTimeout)
+		}
+		_ = conn.SetReadDeadline(readDeadline)
 		n, addr, err := conn.ReadFrom(buf)
 		if err != nil {
 			if ctx.Err() != nil || isTimeout(err) {
 				elapsed := time.Since(start)
-				printUDPPerfListen(packets, bytes, elapsed, int64(expected))
-				if jsonOut {
-					printJSON(udpPerfListenRecord(packets, bytes, elapsed, int64(expected)))
-				}
-				return nil
+				return udpPerfListenResult{Packets: packets, Bytes: bytes, Elapsed: elapsed}, nil
 			}
-			return fmt.Errorf("udp perf listen read: %w", err)
+			return udpPerfListenResult{}, fmt.Errorf("udp perf listen read: %w", err)
 		}
 		packets++
 		bytes += int64(n)
 		_ = conn.SetWriteDeadline(deadline(ctx))
 		if _, err := conn.WriteTo(buf[:n], addr); err != nil {
-			return fmt.Errorf("udp perf listen write %s: %w", addr, err)
+			return udpPerfListenResult{}, fmt.Errorf("udp perf listen write %s: %w", addr, err)
 		}
 		if expected > 0 && packets >= int64(expected) {
 			elapsed := time.Since(start)
-			printUDPPerfListen(packets, bytes, elapsed, int64(expected))
-			if jsonOut {
-				printJSON(udpPerfListenRecord(packets, bytes, elapsed, int64(expected)))
-			}
-			return nil
+			return udpPerfListenResult{Packets: packets, Bytes: bytes, Elapsed: elapsed}, nil
 		}
 	}
 }
