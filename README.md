@@ -146,10 +146,8 @@ To rerun the two-host productization matrix after the peer is reachable, use:
 ```sh
 SSH_TARGET=tmc2@10.0.18.249 \
   OUTPUT=/tmp/awdl-webrtc-matrix.txt \
-  scripts/remote-matrix.sh
-
-go run ./cmd/matrix-summary /tmp/awdl-webrtc-matrix.txt \
-  > /tmp/awdl-webrtc-matrix-summary.md
+  SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-summary.md \
+  scripts/remote-matrix-bundle.sh
 ```
 
 Before the matrix, capture the interface and route state from both Macs:
@@ -175,7 +173,8 @@ printed listener host/port plus sender-side route checks before sending, so
 zero-datagram failures have socket and route context in the transcript. The
 `cmd/matrix-summary` command reads the saved transcript and renders the JSON
 perf/latency records plus de-duplicated failed matrix steps as a compact
-Markdown table.
+Markdown table. Use `scripts/remote-matrix-bundle.sh` when you want both files
+written in one run; it preserves the matrix exit code after writing the summary.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `OUTPUT`,
 `NW_CONNECT_TIMEOUT`, `NW_CONNECT_RETRIES`, `CANDIDATE_POLICY`, or

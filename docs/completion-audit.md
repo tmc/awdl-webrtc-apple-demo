@@ -12,7 +12,7 @@ do not complete requirements that need a fresh two-host run.
 | Published modules | PASS: the demo resolves `github.com/tmc/apple v0.6.7` and `github.com/tmc/apple-pion v0.1.0` from the module cache with no local replace. |
 | Published repos | PASS: demo, `apple-pion`, and `apple` HEADs are published at `origin/main`; `apple-pion` is tagged `v0.1.0`. |
 | Remote reachability | BLOCKED: `ssh -o ConnectTimeout=5 -o BatchMode=yes tmc2@10.0.18.249 true` times out. |
-| Remote matrix | BLOCKED: `scripts/remote-matrix.sh` now records local route, ping, TCP/22, `scutil --nwi`, interface-list diagnostics, and `candidate_policy=auto` before checking SSH reachability; it emits `FAIL: remote reachability exit=255` and exits before building/copying while `tmc2` is unreachable. Once setup succeeds, per-profile probes capture listener-side route, `lsof`, `netstat`, and sender-side route context, continue after failures, and end with a matrix summary. |
+| Remote matrix | BLOCKED: `scripts/remote-matrix.sh` now records local route, ping, TCP/22, `scutil --nwi`, interface-list diagnostics, and `candidate_policy=auto` before checking SSH reachability; it emits `FAIL: remote reachability exit=255` and exits before building/copying while `tmc2` is unreachable. `scripts/remote-matrix-bundle.sh` writes the raw transcript and Markdown summary even for that setup failure, then returns the matrix exit code. Once setup succeeds, per-profile probes capture listener-side route, `lsof`, `netstat`, and sender-side route context, continue after failures, and end with a matrix summary. |
 
 ## Requirement Checklist
 
@@ -40,18 +40,14 @@ CANDIDATE_POLICY=auto \
 REQUIRE_PATHS=1 \
 SSH_TARGET=tmc2@10.0.18.249 \
 OUTPUT=/tmp/awdl-webrtc-matrix.txt \
-scripts/remote-matrix.sh
-
-go run ./cmd/matrix-summary /tmp/awdl-webrtc-matrix.txt \
-  > /tmp/awdl-webrtc-matrix-summary.md
+SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-summary.md \
+scripts/remote-matrix-bundle.sh
 
 DURATION=10s TRIALS=5 WINDOW=8 STREAMS=2 CANDIDATE_POLICY=auto REQUIRE_PATHS=1 \
 SSH_TARGET=tmc2@10.0.18.249 \
 OUTPUT=/tmp/awdl-webrtc-matrix-long.txt \
-scripts/remote-matrix.sh
-
-go run ./cmd/matrix-summary /tmp/awdl-webrtc-matrix-long.txt \
-  > /tmp/awdl-webrtc-matrix-long-summary.md
+SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-long-summary.md \
+scripts/remote-matrix-bundle.sh
 ```
 
 The goal is not complete until the fresh remote matrix proves the auto-candidate
