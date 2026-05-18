@@ -11,6 +11,7 @@ warmup=${WARMUP:-0}
 size=${SIZE:-1200}
 trials=${TRIALS:-3}
 window=${WINDOW:-4}
+streams=${STREAMS:-1}
 timeout=${TIMEOUT:-45s}
 message=${MESSAGE:-callback}
 connect_timeout=${CONNECT_TIMEOUT:-5}
@@ -81,7 +82,7 @@ remote_send() {
 	if [[ -n $duration ]]; then
 		duration_arg=" -duration $(sq "$duration")"
 	fi
-	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-perf-send -peer $(sq "$peer") -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -window $(sq "$window") -perf-json -timeout $(sq "$timeout")"
+	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-perf-send -peer $(sq "$peer") -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -window $(sq "$window") -streams $(sq "$streams") -perf-json -timeout $(sq "$timeout")"
 }
 
 local_send() {
@@ -91,19 +92,19 @@ local_send() {
 	if [[ -n $duration ]]; then
 		args=(-duration "$duration")
 	fi
-	run "$local_bin" -profile "$profile" -backend network -mode udp-perf-send -peer "$peer" -count "$count" "${args[@]}" -warmup "$warmup" -size "$size" -trials "$trials" -window "$window" -perf-json -timeout "$timeout"
+	run "$local_bin" -profile "$profile" -backend network -mode udp-perf-send -peer "$peer" -count "$count" "${args[@]}" -warmup "$warmup" -size "$size" -trials "$trials" -window "$window" -streams "$streams" -perf-json -timeout "$timeout"
 }
 
 run_local_listener_then_remote_sender() {
 	local profile=$1
-	local expected=$(((count + warmup) * trials))
+	local args=()
 	if [[ -n $duration ]]; then
-		expected=0
+		args=(-duration "$duration")
 	fi
 	local log
 	log=$(mktemp)
 	printf '## %s remote-to-local UDP perf\n' "$profile"
-	"$local_bin" -profile "$profile" -backend network -mode udp-perf-listen -count "$expected" -perf-json -timeout "$timeout" >"$log" 2>&1 &
+	"$local_bin" -profile "$profile" -backend network -mode udp-perf-listen -count "$count" "${args[@]}" -warmup "$warmup" -trials "$trials" -streams "$streams" -perf-json -timeout "$timeout" >"$log" 2>&1 &
 	local listener_pid=$!
 	local peer
 	if ! peer=$(wait_for_peer "$log" "local $profile"); then
@@ -122,14 +123,14 @@ run_local_listener_then_remote_sender() {
 
 run_remote_listener_then_local_sender() {
 	local profile=$1
-	local expected=$(((count + warmup) * trials))
+	local duration_arg=
 	if [[ -n $duration ]]; then
-		expected=0
+		duration_arg=" -duration $(sq "$duration")"
 	fi
 	local log
 	log=$(mktemp)
 	printf '## %s local-to-remote UDP perf\n' "$profile"
-	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-perf-listen -count $(sq "$expected") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
+	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
 	local listener_pid=$!
 	local peer
 	if ! peer=$(wait_for_peer "$log" "remote $profile"); then

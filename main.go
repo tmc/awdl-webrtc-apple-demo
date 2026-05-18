@@ -119,6 +119,7 @@ func main() {
 	warmup := flag.Int("warmup", 5, "UDP perf warm-up datagrams to omit")
 	trials := flag.Int("trials", 1, "UDP perf trial count")
 	window := flag.Int("window", 1, "UDP perf maximum in-flight echo requests")
+	streams := flag.Int("streams", 1, "UDP perf concurrent stream count")
 	packetTimeout := flag.Duration("packet-timeout", time.Second, "UDP perf per-datagram echo timeout")
 	perfJSON := flag.Bool("perf-json", false, "also print UDP perf result records as JSON lines")
 	uiInterval := flag.Duration("ui-interval", 3*time.Second, "SwiftUI link monitor sample interval")
@@ -238,15 +239,19 @@ func main() {
 		})
 	case "udp-perf":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return udpPerf(ctx, profile, iface, backend, *count, *size, *warmup, *trials, *window, *packetTimeout, *duration, *perfJSON)
+			return udpPerf(ctx, profile, iface, backend, *count, *size, *warmup, *trials, *window, *streams, *packetTimeout, *duration, *perfJSON)
 		})
 	case "udp-perf-listen":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return udpPerfListen(ctx, profile, iface, backend, *count+*warmup, *perfJSON)
+			expected, err := udpPerfExpected(*count, *warmup, *trials, *streams, *duration)
+			if err != nil {
+				return err
+			}
+			return udpPerfListen(ctx, profile, iface, backend, expected, *perfJSON)
 		})
 	case "udp-perf-send":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return udpPerfSend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials, *window, *packetTimeout, *duration, *perfJSON)
+			return udpPerfSend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials, *window, *streams, *packetTimeout, *duration, *perfJSON)
 		})
 	case "ui":
 		if err := runLinkHealthUI(context.Background(), linkHealthConfig{
@@ -1031,6 +1036,7 @@ type udpPerfResult struct {
 	Size     int
 	Warmup   int
 	Window   int
+	Streams  int
 	Lost     int
 	Elapsed  time.Duration
 	RTT      []time.Duration
@@ -1045,6 +1051,7 @@ type udpPerfRecord struct {
 	DurationNS    int64   `json:"duration_ns,omitempty"`
 	Warmup        int     `json:"warmup,omitempty"`
 	Window        int     `json:"window,omitempty"`
+	Streams       int     `json:"streams,omitempty"`
 	Datagrams     int     `json:"datagrams"`
 	Lost          int     `json:"lost"`
 	LossPercent   float64 `json:"loss_percent"`
@@ -1059,47 +1066,54 @@ type udpPerfRecord struct {
 	Expected      int64   `json:"expected,omitempty"`
 }
 
-func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup, trials, window int, packetTimeout, duration time.Duration, jsonOut bool) error {
+func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup, trials, window, streams int, packetTimeout, duration time.Duration, jsonOut bool) error {
 	if trials <= 0 {
 		return errors.New("udp perf -trials must be positive")
 	}
 	if window <= 0 {
 		return errors.New("udp perf -window must be positive")
 	}
+	if streams <= 0 {
+		return errors.New("udp perf -streams must be positive")
+	}
 	serverLink, err := newLinkPacketConn(profile, iface, backend, "")
 	if err != nil {
 		return err
 	}
 	defer serverLink.conn.Close()
-	clientLink, err := newLinkPacketConn(profile, iface, backend, "")
-	if err != nil {
-		return err
+	clients := make([]net.PacketConn, 0, streams)
+	for i := 0; i < streams; i++ {
+		clientLink, err := newLinkPacketConn(profile, iface, backend, "")
+		if err != nil {
+			return err
+		}
+		defer clientLink.conn.Close()
+		clients = append(clients, clientLink.conn)
 	}
-	defer clientLink.conn.Close()
 	server := serverLink.conn
-	client := clientLink.conn
 
 	errc := make(chan error, 1)
 	serverCtx := ctx
 	cancelServer := func() {}
-	expected := (count + warmup) * trials
+	expected, err := udpPerfExpected(count, warmup, trials, streams, duration)
+	if err != nil {
+		return err
+	}
 	if duration > 0 {
 		serverCtx, cancelServer = context.WithCancel(ctx)
-		expected = 0
 	}
 	defer cancelServer()
 	go echoUDPPackets(serverCtx, server, expected, errc)
 
 	serverAddr := server.LocalAddr()
-	clientAddr := client.LocalAddr()
-	fmt.Printf("udp perf server=%s client=%s network=%s backend=%s server_bound_if=%s client_bound_if=%s window=%d%s\n",
-		serverAddr, clientAddr, serverLink.network, backend, boundIfString(iface, serverLink.bound), boundIfString(iface, clientLink.bound), window, durationSuffix(duration))
+	fmt.Printf("udp perf server=%s clients=%d network=%s backend=%s server_bound_if=%s window=%d streams=%d%s\n",
+		serverAddr, streams, serverLink.network, backend, boundIfString(iface, serverLink.bound), window, streams, durationSuffix(duration))
 	results := make([]udpPerfResult, 0, trials)
 	for trial := 1; trial <= trials; trial++ {
 		if trials > 1 {
 			fmt.Printf("udp perf trial=%d/%d\n", trial, trials)
 		}
-		result, err := runUDPEchoPerf(ctx, client, serverAddr, count, size, warmup, window, packetTimeout, duration)
+		result, err := runUDPEchoPerfStreams(ctx, clients, serverAddr, count, size, warmup, window, packetTimeout, duration)
 		if err != nil {
 			return err
 		}
@@ -1163,7 +1177,7 @@ func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface
 	}
 }
 
-func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup, trials, window int, packetTimeout, duration time.Duration, jsonOut bool) error {
+func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup, trials, window, streams int, packetTimeout, duration time.Duration, jsonOut bool) error {
 	if peer == "" {
 		return errors.New("missing -peer for udp-perf-send")
 	}
@@ -1173,28 +1187,36 @@ func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, 
 	if window <= 0 {
 		return errors.New("udp perf -window must be positive")
 	}
+	if streams <= 0 {
+		return errors.New("udp perf -streams must be positive")
+	}
 	networkName, err := udpNetworkForPeer(peer)
 	if err != nil {
 		return err
 	}
-	link, err := newLinkPacketConn(profile, iface, backend, networkName)
-	if err != nil {
-		return err
+	links := make([]*linkPacketConn, 0, streams)
+	conns := make([]net.PacketConn, 0, streams)
+	for i := 0; i < streams; i++ {
+		link, err := newLinkPacketConn(profile, iface, backend, networkName)
+		if err != nil {
+			return err
+		}
+		defer link.conn.Close()
+		links = append(links, link)
+		conns = append(conns, link.conn)
 	}
-	conn := link.conn
-	defer conn.Close()
 	addr, err := net.ResolveUDPAddr(networkName, peer)
 	if err != nil {
 		return fmt.Errorf("resolve peer %q: %w", peer, err)
 	}
-	fmt.Printf("udp perf local=%s peer=%s network=%s backend=%s bound_if=%s window=%d%s\n",
-		conn.LocalAddr(), addr, networkName, link.backend, boundIfString(iface, link.bound), window, durationSuffix(duration))
+	fmt.Printf("udp perf local=%s streams=%d peer=%s network=%s backend=%s bound_if=%s window=%d%s\n",
+		links[0].conn.LocalAddr(), streams, addr, networkName, links[0].backend, boundIfString(iface, links[0].bound), window, durationSuffix(duration))
 	results := make([]udpPerfResult, 0, trials)
 	for trial := 1; trial <= trials; trial++ {
 		if trials > 1 {
 			fmt.Printf("udp perf trial=%d/%d\n", trial, trials)
 		}
-		result, err := runUDPEchoPerf(ctx, conn, addr, count, size, warmup, window, packetTimeout, duration)
+		result, err := runUDPEchoPerfStreams(ctx, conns, addr, count, size, warmup, window, packetTimeout, duration)
 		if err != nil {
 			return err
 		}
@@ -1236,6 +1258,78 @@ func echoUDPPackets(ctx context.Context, conn net.PacketConn, count int, errc ch
 		}
 	}
 	errc <- nil
+}
+
+func udpPerfExpected(count, warmup, trials, streams int, duration time.Duration) (int, error) {
+	if duration > 0 {
+		return 0, nil
+	}
+	if count <= 0 {
+		return 0, errors.New("udp perf -count must be positive")
+	}
+	if warmup < 0 {
+		return 0, errors.New("udp perf -warmup must be non-negative")
+	}
+	if trials <= 0 {
+		return 0, errors.New("udp perf -trials must be positive")
+	}
+	if streams <= 0 {
+		return 0, errors.New("udp perf -streams must be positive")
+	}
+	return (count + warmup) * trials * streams, nil
+}
+
+type udpPerfStreamResult struct {
+	Index  int
+	Result udpPerfResult
+	Err    error
+}
+
+func runUDPEchoPerfStreams(ctx context.Context, conns []net.PacketConn, addr net.Addr, count, size, warmup, window int, packetTimeout, duration time.Duration) (udpPerfResult, error) {
+	if len(conns) == 0 {
+		return udpPerfResult{}, errors.New("udp perf -streams must be positive")
+	}
+	if len(conns) == 1 {
+		result, err := runUDPEchoPerf(ctx, conns[0], addr, count, size, warmup, window, packetTimeout, duration)
+		result.Streams = 1
+		return result, err
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ch := make(chan udpPerfStreamResult, len(conns))
+	start := time.Now()
+	for i, conn := range conns {
+		go func(i int, conn net.PacketConn) {
+			result, err := runUDPEchoPerf(streamCtx, conn, addr, count, size, warmup, window, packetTimeout, duration)
+			ch <- udpPerfStreamResult{Index: i, Result: result, Err: err}
+		}(i, conn)
+	}
+	out := udpPerfResult{
+		Duration: duration,
+		Size:     size,
+		Window:   window,
+		Streams:  len(conns),
+	}
+	var firstErr error
+	for range conns {
+		item := <-ch
+		if item.Err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("udp perf stream %d: %w", item.Index+1, item.Err)
+				cancel()
+			}
+			continue
+		}
+		out.Count += item.Result.Count
+		out.Warmup += item.Result.Warmup
+		out.Lost += item.Result.Lost
+		out.RTT = append(out.RTT, item.Result.RTT...)
+	}
+	if firstErr != nil {
+		return udpPerfResult{}, firstErr
+	}
+	out.Elapsed = time.Since(start)
+	return out, nil
 }
 
 func runUDPEchoPerf(ctx context.Context, conn net.PacketConn, addr net.Addr, count, size, warmup, window int, packetTimeout, duration time.Duration) (udpPerfResult, error) {
@@ -1308,6 +1402,7 @@ func runUDPEchoPerf(ctx context.Context, conn net.PacketConn, addr net.Addr, cou
 		Size:     size,
 		Warmup:   warmup,
 		Window:   window,
+		Streams:  1,
 		Lost:     lost,
 		Elapsed:  time.Since(start),
 		RTT:      rtt,
@@ -1563,6 +1658,7 @@ func udpPerfRecordForTrial(result udpPerfResult, trial, trials int) udpPerfRecor
 		DurationNS:    result.Duration.Nanoseconds(),
 		Warmup:        result.Warmup,
 		Window:        result.Window,
+		Streams:       result.Streams,
 		Datagrams:     success,
 		Lost:          result.Lost,
 		LossPercent:   lossPercent(int64(result.Lost), int64(result.Count)),
@@ -1590,8 +1686,9 @@ func aggregateUDPPerfResults(results []udpPerfResult) udpPerfResult {
 		return udpPerfResult{}
 	}
 	out := udpPerfResult{
-		Size:   results[0].Size,
-		Window: results[0].Window,
+		Size:    results[0].Size,
+		Window:  results[0].Window,
+		Streams: results[0].Streams,
 	}
 	for _, result := range results {
 		out.Count += result.Count

@@ -183,6 +183,7 @@ func TestUDPPerfRecordForTrial(t *testing.T) {
 		Size:     100,
 		Warmup:   1,
 		Window:   2,
+		Streams:  4,
 		Lost:     1,
 		Elapsed:  10 * time.Millisecond,
 		RTT: []time.Duration{
@@ -199,6 +200,9 @@ func TestUDPPerfRecordForTrial(t *testing.T) {
 	}
 	if record.Window != 2 {
 		t.Fatalf("record window = %d, want 2", record.Window)
+	}
+	if record.Streams != 4 {
+		t.Fatalf("record streams = %d, want 4", record.Streams)
 	}
 	if record.DurationNS != int64(5*time.Second) {
 		t.Fatalf("record duration = %d, want %d", record.DurationNS, int64(5*time.Second))
@@ -221,6 +225,7 @@ func TestUDPPerfRecordForSummary(t *testing.T) {
 			Size:    100,
 			Warmup:  1,
 			Window:  2,
+			Streams: 2,
 			Lost:    1,
 			Elapsed: 10 * time.Millisecond,
 			RTT: []time.Duration{
@@ -233,6 +238,7 @@ func TestUDPPerfRecordForSummary(t *testing.T) {
 			Size:    100,
 			Warmup:  1,
 			Window:  2,
+			Streams: 2,
 			Lost:    0,
 			Elapsed: 20 * time.Millisecond,
 			RTT: []time.Duration{
@@ -246,7 +252,7 @@ func TestUDPPerfRecordForSummary(t *testing.T) {
 	if summary.Count != 6 || summary.Warmup != 2 || summary.Lost != 1 || summary.Elapsed != 30*time.Millisecond {
 		t.Fatalf("summary counts = %#v", summary)
 	}
-	if len(summary.RTT) != 5 || summary.Window != 2 || summary.Size != 100 {
+	if len(summary.RTT) != 5 || summary.Window != 2 || summary.Streams != 2 || summary.Size != 100 {
 		t.Fatalf("summary shape = %#v", summary)
 	}
 	record := udpPerfRecordForSummary(summary, len(results))
@@ -280,6 +286,23 @@ func TestUDPPerfListenRecord(t *testing.T) {
 	}
 }
 
+func TestUDPPerfExpected(t *testing.T) {
+	got, err := udpPerfExpected(10, 2, 3, 4, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 144 {
+		t.Fatalf("udpPerfExpected = %d, want 144", got)
+	}
+	got, err = udpPerfExpected(10, 2, 3, 4, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 0 {
+		t.Fatalf("duration udpPerfExpected = %d, want 0", got)
+	}
+}
+
 func TestRunUDPEchoPerfCountsReadTimeoutsAsLoss(t *testing.T) {
 	conn := &timeoutPacketConn{}
 	result, err := runUDPEchoPerf(context.Background(), conn, &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9}, 3, 16, 0, 1, time.Millisecond, 0)
@@ -308,6 +331,20 @@ func TestRunUDPEchoPerfWindowPipelines(t *testing.T) {
 	}
 	if conn.maxQueued != 3 {
 		t.Fatalf("max queued = %d, want 3", conn.maxQueued)
+	}
+}
+
+func TestRunUDPEchoPerfStreamsAggregates(t *testing.T) {
+	conns := []net.PacketConn{
+		&timeoutPacketConn{},
+		&timeoutPacketConn{},
+	}
+	result, err := runUDPEchoPerfStreams(context.Background(), conns, &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9}, 3, 16, 0, 1, time.Millisecond, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Streams != 2 || result.Count != 6 || result.Lost != 6 || len(result.RTT) != 0 {
+		t.Fatalf("result streams=%d count=%d lost=%d rtt=%d, want 2, 6, 6, 0", result.Streams, result.Count, result.Lost, len(result.RTT))
 	}
 }
 
