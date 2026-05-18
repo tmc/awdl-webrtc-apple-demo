@@ -4,10 +4,15 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/pion/webrtc/v4"
+	"github.com/tmc/awdl-webrtc-apple-demo/internal/icepolicy"
 )
 
 func TestShouldBindUDPToInterface(t *testing.T) {
@@ -104,6 +109,50 @@ func TestDefaultThunderboltInterface(t *testing.T) {
 				t.Fatalf("defaultThunderboltInterface() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNewWireSignalPublishesRawCandidates(t *testing.T) {
+	desc := webrtc.SessionDescription{
+		Type: webrtc.SDPTypeOffer,
+		SDP: strings.Join([]string{
+			"v=0",
+			"m=application 9 UDP/DTLS/SCTP webrtc-datachannel",
+			"a=mid:0",
+			"a=candidate:1 1 udp 2130706431 fd00::1 12345 typ host ufrag test",
+			"a=end-of-candidates",
+		}, "\n"),
+	}
+	signal := newWireSignal(desc, icepolicy.Policy{RawHostCandidates: true}, net.ParseIP("fe80::1"))
+	if strings.Contains(signal.Description.SDP, "a=candidate:") || strings.Contains(signal.Description.SDP, "a=end-of-candidates") {
+		t.Fatalf("description still contains candidates:\n%s", signal.Description.SDP)
+	}
+	if len(signal.Candidates) != 1 {
+		t.Fatalf("candidates = %d, want 1", len(signal.Candidates))
+	}
+	if !strings.Contains(signal.Candidates[0].Candidate, " fe80::1 12345 typ host ") {
+		t.Fatalf("candidate was not published with link-local IP: %q", signal.Candidates[0].Candidate)
+	}
+	if signal.Candidates[0].SDPMid == nil || *signal.Candidates[0].SDPMid != "0" {
+		t.Fatalf("candidate mid = %v, want 0", signal.Candidates[0].SDPMid)
+	}
+	if signal.Candidates[0].SDPMLineIndex == nil || *signal.Candidates[0].SDPMLineIndex != 0 {
+		t.Fatalf("candidate m-line = %v, want 0", signal.Candidates[0].SDPMLineIndex)
+	}
+}
+
+func TestDecodeWireSignalAcceptsLegacyDescription(t *testing.T) {
+	desc := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: "v=0"}
+	data, err := json.Marshal(desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signal, err := decodeWireSignal(base64.StdEncoding.EncodeToString(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signal.Description.SDP != desc.SDP || signal.Description.Type != desc.Type {
+		t.Fatalf("legacy signal = %#v, want %#v", signal.Description, desc)
 	}
 }
 

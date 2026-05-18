@@ -500,9 +500,7 @@ func gather(ctx context.Context, profile linkProfile, iface linkInterface, backe
 	if desc == nil {
 		return errors.New("missing local description after gather")
 	}
-	sdp := desc.SDP
-	sdp = candidatePolicy.Publish(sdp, link.ip)
-	candidates := candidateLines(sdp)
+	candidates := publishedCandidateLines(desc.SDP, candidatePolicy, link.ip)
 	if len(candidates) == 0 {
 		return fmt.Errorf("no ICE candidates gathered for %s", iface.Name)
 	}
@@ -608,12 +606,12 @@ func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, 
 		})
 	})
 
-	offer, err := readWireDescription(bufio.NewScanner(os.Stdin), "OFFER")
+	offer, err := readWireSignal(bufio.NewScanner(os.Stdin), "OFFER")
 	if err != nil {
 		return err
 	}
-	if err := pc.SetRemoteDescription(offer); err != nil {
-		return fmt.Errorf("set remote offer: %w", err)
+	if err := setRemoteWireSignal(pc, offer, "offer"); err != nil {
+		return err
 	}
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
@@ -626,9 +624,7 @@ func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, 
 	if err := wait(ctx, gathered, "answer gather"); err != nil {
 		return err
 	}
-	desc := *pc.LocalDescription()
-	desc.SDP = candidatePolicy.Publish(desc.SDP, link.ip)
-	wire, err := encodeWireDescription(desc)
+	wire, err := encodeWireSignal(newWireSignal(*pc.LocalDescription(), candidatePolicy, link.ip))
 	if err != nil {
 		return err
 	}
@@ -686,9 +682,7 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 	if err := wait(ctx, gathered, "offer gather"); err != nil {
 		return err
 	}
-	desc := *pc.LocalDescription()
-	desc.SDP = candidatePolicy.Publish(desc.SDP, link.ip)
-	wireOffer, err := encodeWireDescription(desc)
+	wireOffer, err := encodeWireSignal(newWireSignal(*pc.LocalDescription(), candidatePolicy, link.ip))
 	if err != nil {
 		return err
 	}
@@ -725,7 +719,7 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 	waitc := make(chan error, 1)
 	go func() { waitc <- cmd.Wait() }()
 
-	answerc := make(chan webrtc.SessionDescription, 1)
+	answerc := make(chan wireSignal, 1)
 	scanErrc := make(chan error, 1)
 	go scanRemoteAnswer(stdout, answerc, scanErrc)
 
@@ -736,7 +730,7 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 		return fmt.Errorf("close ssh stdin: %w", err)
 	}
 
-	var answer webrtc.SessionDescription
+	var answer wireSignal
 	select {
 	case answer = <-answerc:
 	case err := <-scanErrc:
@@ -744,8 +738,8 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 	case <-ctx.Done():
 		return fmt.Errorf("wait for ssh answer: %w", ctx.Err())
 	}
-	if err := pc.SetRemoteDescription(answer); err != nil {
-		return fmt.Errorf("set remote answer: %w", err)
+	if err := setRemoteWireSignal(pc, answer, "answer"); err != nil {
+		return err
 	}
 	select {
 	case <-opened:
@@ -1636,6 +1630,11 @@ type signalOptions struct {
 	RightIP         net.IP
 }
 
+type wireSignal struct {
+	Description webrtc.SessionDescription `json:"description"`
+	Candidates  []webrtc.ICECandidateInit `json:"candidates,omitempty"`
+}
+
 func signalNonTrickle(left, right *webrtc.PeerConnection, ctx context.Context, opts signalOptions) error {
 	offer, err := left.CreateOffer(nil)
 	if err != nil {
@@ -1648,10 +1647,9 @@ func signalNonTrickle(left, right *webrtc.PeerConnection, ctx context.Context, o
 	if err := wait(ctx, leftGathered, "left gather"); err != nil {
 		return err
 	}
-	leftDesc := *left.LocalDescription()
-	leftDesc.SDP = opts.CandidatePolicy.Publish(leftDesc.SDP, opts.LeftIP)
-	if err := right.SetRemoteDescription(leftDesc); err != nil {
-		return fmt.Errorf("right set remote offer: %w", err)
+	leftSignal := newWireSignal(*left.LocalDescription(), opts.CandidatePolicy, opts.LeftIP)
+	if err := setRemoteWireSignal(right, leftSignal, "right offer"); err != nil {
+		return err
 	}
 	answer, err := right.CreateAnswer(nil)
 	if err != nil {
@@ -1664,57 +1662,84 @@ func signalNonTrickle(left, right *webrtc.PeerConnection, ctx context.Context, o
 	if err := wait(ctx, rightGathered, "right gather"); err != nil {
 		return err
 	}
-	rightDesc := *right.LocalDescription()
-	rightDesc.SDP = opts.CandidatePolicy.Publish(rightDesc.SDP, opts.RightIP)
-	if err := left.SetRemoteDescription(rightDesc); err != nil {
-		return fmt.Errorf("left set remote answer: %w", err)
+	rightSignal := newWireSignal(*right.LocalDescription(), opts.CandidatePolicy, opts.RightIP)
+	if err := setRemoteWireSignal(left, rightSignal, "left answer"); err != nil {
+		return err
 	}
 	return nil
 }
 
-func encodeWireDescription(desc webrtc.SessionDescription) (string, error) {
-	data, err := json.Marshal(desc)
+func newWireSignal(desc webrtc.SessionDescription, policy icepolicy.Policy, localIP net.IP) wireSignal {
+	if !policy.UsesSyntheticHostCandidate(localIP) {
+		return wireSignal{Description: desc}
+	}
+	candidates := candidateInitsFromSDP(desc.SDP, policy, localIP)
+	desc.SDP = icepolicy.StripSDPCandidates(desc.SDP)
+	return wireSignal{Description: desc, Candidates: candidates}
+}
+
+func setRemoteWireSignal(pc *webrtc.PeerConnection, signal wireSignal, label string) error {
+	if err := pc.SetRemoteDescription(signal.Description); err != nil {
+		return fmt.Errorf("set remote %s: %w", label, err)
+	}
+	for i, candidate := range signal.Candidates {
+		if err := pc.AddICECandidate(candidate); err != nil {
+			return fmt.Errorf("add remote %s candidate %d: %w", label, i, err)
+		}
+	}
+	return nil
+}
+
+func encodeWireSignal(signal wireSignal) (string, error) {
+	data, err := json.Marshal(signal)
 	if err != nil {
-		return "", fmt.Errorf("marshal session description: %w", err)
+		return "", fmt.Errorf("marshal wire signal: %w", err)
 	}
 	return base64.StdEncoding.EncodeToString(data), nil
 }
 
-func readWireDescription(scanner *bufio.Scanner, prefix string) (webrtc.SessionDescription, error) {
+func readWireSignal(scanner *bufio.Scanner, prefix string) (wireSignal, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if !strings.HasPrefix(line, prefix+" ") {
 			continue
 		}
-		return decodeWireDescription(strings.TrimSpace(strings.TrimPrefix(line, prefix+" ")))
+		return decodeWireSignal(strings.TrimSpace(strings.TrimPrefix(line, prefix+" ")))
 	}
 	if err := scanner.Err(); err != nil {
-		return webrtc.SessionDescription{}, fmt.Errorf("read %s: %w", strings.ToLower(prefix), err)
+		return wireSignal{}, fmt.Errorf("read %s: %w", strings.ToLower(prefix), err)
 	}
-	return webrtc.SessionDescription{}, fmt.Errorf("missing %s line", prefix)
+	return wireSignal{}, fmt.Errorf("missing %s line", prefix)
 }
 
-func decodeWireDescription(value string) (webrtc.SessionDescription, error) {
+func decodeWireSignal(value string) (wireSignal, error) {
 	data, err := base64.StdEncoding.DecodeString(value)
 	if err != nil {
-		return webrtc.SessionDescription{}, fmt.Errorf("decode session description: %w", err)
+		return wireSignal{}, fmt.Errorf("decode wire signal: %w", err)
+	}
+	var signal wireSignal
+	if err := json.Unmarshal(data, &signal); err == nil && signal.Description.SDP != "" {
+		return signal, nil
 	}
 	var desc webrtc.SessionDescription
 	if err := json.Unmarshal(data, &desc); err != nil {
-		return webrtc.SessionDescription{}, fmt.Errorf("unmarshal session description: %w", err)
+		return wireSignal{}, fmt.Errorf("unmarshal wire signal: %w", err)
 	}
-	return desc, nil
+	if desc.SDP == "" {
+		return wireSignal{}, errors.New("wire signal missing session description")
+	}
+	return wireSignal{Description: desc}, nil
 }
 
-func scanRemoteAnswer(r io.Reader, answerc chan<- webrtc.SessionDescription, errc chan<- error) {
+func scanRemoteAnswer(r io.Reader, answerc chan<- wireSignal, errc chan<- error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	sentAnswer := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "ANSWER ") {
-			answer, err := decodeWireDescription(strings.TrimSpace(strings.TrimPrefix(line, "ANSWER ")))
+			answer, err := decodeWireSignal(strings.TrimSpace(strings.TrimPrefix(line, "ANSWER ")))
 			if err != nil {
 				errc <- err
 				return
@@ -1779,6 +1804,47 @@ func candidateLines(sdp string) []string {
 		}
 	}
 	return out
+}
+
+func publishedCandidateLines(sdp string, policy icepolicy.Policy, localIP net.IP) []string {
+	lines := candidateLines(sdp)
+	if !policy.UsesSyntheticHostCandidate(localIP) {
+		return lines
+	}
+	for i, line := range lines {
+		candidate := strings.TrimPrefix(line, "a=")
+		lines[i] = "a=" + policy.PublishCandidate(candidate, localIP)
+	}
+	return lines
+}
+
+func candidateInitsFromSDP(sdp string, policy icepolicy.Policy, localIP net.IP) []webrtc.ICECandidateInit {
+	var candidates []webrtc.ICECandidateInit
+	var mid string
+	var mline int
+	for _, line := range strings.Split(sdp, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "m="):
+			mline++
+			mid = ""
+		case strings.HasPrefix(line, "a=mid:"):
+			mid = strings.TrimPrefix(line, "a=mid:")
+		case strings.HasPrefix(line, "a=candidate:"):
+			candidate := strings.TrimPrefix(line, "a=")
+			init := webrtc.ICECandidateInit{Candidate: policy.PublishCandidate(candidate, localIP)}
+			if mid != "" {
+				midCopy := mid
+				init.SDPMid = &midCopy
+			}
+			if mline > 0 {
+				index := uint16(mline - 1)
+				init.SDPMLineIndex = &index
+			}
+			candidates = append(candidates, init)
+		}
+	}
+	return candidates
 }
 
 func candidatesUseInterface(candidates []string, ips []net.IP) bool {
