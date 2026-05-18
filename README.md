@@ -11,44 +11,75 @@ It has three profiles:
   peer-to-peer Wi-Fi, and uses private `NWParameters` knobs for `useAWDL`,
   `useP2P`, exact required interface, socket access, local address reuse, and
   fallback prohibition.
-- `thunderbolt`: uses the Thunderbolt Bridge, normally `bridge0`, sets public
-  Network.framework UDP parameters to wired Ethernet, and uses private
-  `NWParameters` to require the exact bridge interface.
-- `lan`: uses `en0`, sets public Network.framework UDP parameters to Wi-Fi, and
-  uses private `NWParameters` to require the exact LAN interface.
+- `thunderbolt`: uses the Thunderbolt Bridge, normally `bridge0`. The Go
+  backend binds ordinary UDP sockets to the bridge address; the Network.framework
+  backend lets the link-local peer address select `bridge0`.
+- `lan`: uses `en0`. The Go backend binds ordinary UDP sockets to the LAN
+  address; the Network.framework backend uses Wi-Fi UDP policy and the LAN peer
+  address selects `en0`.
 
 Run the local checks:
 
 ```sh
-go run . -profile awdl -mode check
-go run . -profile awdl -mode gather -timeout 10s
-go run . -profile awdl -mode udp -timeout 10s
-go run . -profile awdl -mode udp-perf -count 1000 -size 1200 -warmup 5 -timeout 20s
+go run . -profile awdl -backend go -mode check
+go run . -profile awdl -backend go -mode gather -timeout 10s
+go run . -profile awdl -backend go -mode udp -timeout 10s
+go run . -profile awdl -backend go -mode udp-perf -count 1000 -size 1200 -warmup 5 -timeout 20s
 
-go run . -profile lan -mode check
-go run . -profile lan -mode udp-perf -count 1000 -size 1200 -warmup 5 -timeout 20s
+go run . -profile lan -backend network -mode gather -timeout 10s
+go run . -profile thunderbolt -backend network -mode gather -timeout 10s
+go run . -profile awdl -backend network -mode gather -timeout 10s
+go run . -profile awdl -backend network -mdns disabled -raw-candidates -mode gather -timeout 10s
 
-go run . -profile thunderbolt -mode check
-go run . -profile thunderbolt -mode gather -timeout 10s
-go run . -profile thunderbolt -mode pair -timeout 12s
-go run . -profile thunderbolt -mode udp-perf -count 1000 -size 1200 -warmup 5 -timeout 20s
+go run . -profile thunderbolt -backend go -mode check
+go run . -profile thunderbolt -backend go -mode gather -timeout 10s
+go run . -profile thunderbolt -backend go -mode pair -timeout 12s
+go run . -profile thunderbolt -backend go -mode udp-perf -count 1000 -size 1200 -warmup 5 -timeout 20s
 ```
 
 Use `-iface` to override the default interface:
 
 ```sh
-go run . -profile thunderbolt -iface en1 -mode gather -timeout 10s
+go run . -profile thunderbolt -iface en1 -backend network -mode gather -timeout 10s
 ```
+
+The `-backend` flag selects `go` or `network`.
+
+- `go` uses ordinary Darwin UDP sockets. It is the stable throughput and
+  same-host WebRTC datachannel path.
+- `network` uses Network.framework as a `net.PacketConn`. It creates clear UDP
+  parameters, sets `includePeerToPeer`, uses required interface type where it
+  works, and for AWDL uses the private `NWInterface.cInterface` object to force
+  the path to `awdl0`.
 
 The `gather` mode binds Pion's ICE UDP mux to the selected interface address,
 enables mDNS host candidates, and verifies candidates are either from the
 selected IP set or mDNS publication. mDNS is intentional: Pion filters raw IPv6
 link-local host candidates for privacy.
 
+For explicit two-process signaling, `-mdns disabled -raw-candidates` publishes
+AWDL link-local candidates by using a synthetic non-link-local host candidate
+inside Pion and rewriting the exchanged SDP back to the selected interface IP.
+This keeps the demo no-fork while making AWDL link-local ICE testable.
+
 The `pair` mode creates two local PeerConnections and exchanges a datachannel
 payload over the constrained interface. On this host, Thunderbolt Bridge pairing
-passes. AWDL candidate gathering passes, but a real remote AWDL WebRTC proof
-still needs another Apple peer and an out-of-band signaling exchange.
+passes. AWDL same-host pairing is not useful because AWDL traffic is peer-link
+traffic; use `offer-ssh` against another Apple host.
+
+The `offer-ssh` mode runs the local side, starts `answer-stdio` on a peer over
+SSH, exchanges SDP over stdin/stdout, and waits for a WebRTC datachannel
+`ping`/`pong`:
+
+```sh
+go run . -profile thunderbolt -backend network -mode offer-ssh \
+  -ssh tmc2@10.0.18.249 -remote-bin /tmp/awdl-webrtc-apple-demo-bin \
+  -raw-candidates -timeout 35s
+
+go run . -profile awdl -backend network -mdns disabled -raw-candidates \
+  -mode offer-ssh -ssh tmc2@10.0.18.249 \
+  -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 45s
+```
 
 The `udp` mode opens two ordinary Go UDP sockets on the selected interface,
 sets Darwin `IP_BOUND_IF` or `IPV6_BOUND_IF` for AWDL or scoped IPv6 sockets,
@@ -65,20 +96,25 @@ for AWDL activation outliers. This is a smoke benchmark, not a replacement for
 For a two-host AWDL UDP proof, run the listener on one Mac:
 
 ```sh
-go run . -profile awdl -mode udp-listen -timeout 60s
-go run . -profile awdl -mode udp-perf-listen -timeout 60s
+go run . -profile awdl -backend go -mode udp-listen -timeout 60s
+go run . -profile awdl -backend go -mode udp-perf-listen -timeout 60s
 ```
 
 Then send to the printed scoped address from another Mac:
 
 ```sh
-go run . -profile awdl -mode udp-send -peer '[fe80::peer%awdl0]:12345' -timeout 10s
-go run . -profile awdl -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -count 1000 -size 1200 -warmup 5 -timeout 20s
+go run . -profile awdl -backend go -mode udp-send -peer '[fe80::peer%awdl0]:12345' -timeout 10s
+go run . -profile awdl -backend go -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -count 1000 -size 1200 -warmup 5 -timeout 20s
 ```
 
-This is not a Network.framework-backed Pion transport. Pion still uses Go UDP
-sockets; `github.com/tmc/apple` is used here to prove the Network.framework
-policy knobs and private interface constraints that should sit next to the
-WebRTC backend. The direct UDP path is constrained separately with Darwin
-socket options, because binding only to an AWDL address is not sufficient on
-macOS.
+For Network.framework diagnostics, set:
+
+```sh
+AWDL_DEMO_NETWORK_TRACE=1 go run . -profile awdl -backend network -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -count 20 -warmup 0 -size 1200
+```
+
+The Network.framework backend proves Pion ICE gathering, raw UDP echo/perf, and
+remote WebRTC datachannel exchange over LAN, Thunderbolt, and AWDL. It remains a
+demo backend: AWDL WebRTC uses explicit SSH signaling plus raw candidate
+rewriting, and the PacketConn is not a replacement for Pion's full `transport.Net`
+surface.
