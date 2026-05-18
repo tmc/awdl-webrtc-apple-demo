@@ -164,9 +164,10 @@ probes continue after failures and end with a matrix summary so one asymmetric
 UDP direction does not hide later evidence.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `OUTPUT`,
-`NW_CONNECT_TIMEOUT`, or `NW_CONNECT_RETRIES` to narrow, lengthen, save, or tune
-a run. When `DURATION` is set, sender trials run for that duration instead of a
-fixed datagram count and listeners run until their timeout. Set
+`NW_CONNECT_TIMEOUT`, `NW_CONNECT_RETRIES`, or `LISTEN_IDLE_TIMEOUT` to narrow,
+lengthen, save, or tune a run. When `DURATION` is set, sender trials run for
+that duration instead of a fixed datagram count and listeners stop after
+`LISTEN_IDLE_TIMEOUT` once traffic goes idle. Set
 `REQUIRE_PATHS=1` to add `-require-path-interface` and `-forbid-loopback-path`
 to sender runs; LAN defaults to `en0`, AWDL defaults to `awdl0`, and
 Thunderbolt uses `THUNDERBOLT_PATH_INTERFACE` when set. Set `SSH_HOST` when the
@@ -213,8 +214,10 @@ latency run when the observed path is inconsistent with the requested link. Use
 `-nw-connect-timeout` and `-nw-connect-retries` to tune outbound
 Network.framework readiness retry during asymmetric link tests.
 Echo timeouts are counted as lost datagrams after `-packet-timeout`, while
-write and corrupt-reply errors still fail the run. This is a smoke benchmark,
-not a replacement for `iperf3`.
+write and corrupt-reply errors still fail the run. For duration-based
+two-process tests, set `-listen-idle-timeout` on `udp-perf-listen` so the
+listener exits after the sender stops instead of waiting for the outer
+`-timeout`. This is a smoke benchmark, not a replacement for `iperf3`.
 
 For a two-host AWDL UDP proof, run the listener on one Mac:
 
