@@ -12,7 +12,7 @@ do not complete requirements that need a fresh two-host run.
 | Published modules | PASS: the demo resolves `github.com/tmc/apple v0.6.7` and `github.com/tmc/apple-pion v0.1.0` from the module cache with no local replace. |
 | Published repos | PASS: demo, `apple-pion`, and `apple` HEADs are published at `origin/main`; `apple-pion` is tagged `v0.1.0`. |
 | Remote reachability | BLOCKED: `ssh -o ConnectTimeout=5 -o BatchMode=yes tmc2@10.0.18.249 true` times out. |
-| Remote matrix | BLOCKED: `scripts/remote-matrix.sh` now checks SSH reachability first and exits before building/copying while `tmc2` is unreachable. |
+| Remote matrix | BLOCKED: `scripts/remote-matrix.sh` now checks SSH reachability first and exits before building/copying while `tmc2` is unreachable. Once setup succeeds, per-profile probes continue after failures and end with a matrix summary. |
 
 ## Requirement Checklist
 

@@ -325,6 +325,22 @@ run_remote_callback_then_local_request() {
 	return "$rc"
 }
 
+matrix_failures=0
+matrix_failed=()
+
+record_matrix_step() {
+	local label=$1
+	shift
+	if "$@"; then
+		return
+	else
+		local rc=$?
+		printf 'FAIL: %s exit=%d\n' "$label" "$rc" >&2
+		matrix_failed+=("$label exit=$rc")
+		matrix_failures=$((matrix_failures + 1))
+	fi
+}
+
 printf '## remote reachability\n'
 remote "true"
 
@@ -337,12 +353,22 @@ remote "chmod +x $(sq "$remote_bin") && $(sq "$remote_bin") -mode check -profile
 
 for profile in $profiles; do
 	printf '## %s Pion transport.Net WebRTC\n' "$profile"
-	run "$local_bin" -profile "$profile" -backend network -nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries" -pion-net -mdns disabled -raw-candidates -mode offer-ssh -ssh "$ssh_target" -remote-bin "$remote_bin" -timeout "$timeout"
+	record_matrix_step "$profile Pion transport.Net WebRTC" run "$local_bin" -profile "$profile" -backend network -nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries" -pion-net -mdns disabled -raw-candidates -mode offer-ssh -ssh "$ssh_target" -remote-bin "$remote_bin" -timeout "$timeout"
 
-	run_local_listener_then_remote_sender "$profile"
-	run_remote_listener_then_local_sender "$profile"
-	run_local_listener_then_remote_latency "$profile"
-	run_remote_listener_then_local_latency "$profile"
-	run_local_callback_then_remote_request "$profile"
-	run_remote_callback_then_local_request "$profile"
+	record_matrix_step "$profile remote-to-local UDP perf" run_local_listener_then_remote_sender "$profile"
+	record_matrix_step "$profile local-to-remote UDP perf" run_remote_listener_then_local_sender "$profile"
+	record_matrix_step "$profile remote-to-local UDP latency" run_local_listener_then_remote_latency "$profile"
+	record_matrix_step "$profile local-to-remote UDP latency" run_remote_listener_then_local_latency "$profile"
+	record_matrix_step "$profile callback remote-to-local request" run_local_callback_then_remote_request "$profile"
+	record_matrix_step "$profile callback local-to-remote request" run_remote_callback_then_local_request "$profile"
 done
+
+printf '## matrix summary\n'
+if ((matrix_failures != 0)); then
+	printf 'matrix failed steps=%d\n' "$matrix_failures" >&2
+	for failure in "${matrix_failed[@]}"; do
+		printf 'FAIL: %s\n' "$failure" >&2
+	done
+	exit 1
+fi
+printf 'matrix passed profiles=%s\n' "$profiles"

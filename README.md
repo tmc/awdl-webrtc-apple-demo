@@ -158,6 +158,8 @@ The script first checks SSH reachability, then builds a temporary local binary,
 copies it to `REMOTE_BIN` on the peer, and runs LAN, Thunderbolt, and AWDL
 `-pion-net` WebRTC plus
 Network.framework UDP perf, latency, and callback probes in both directions.
+After setup, per-profile probes continue after failures and end with a matrix
+summary so one asymmetric UDP direction does not hide later evidence.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `NW_CONNECT_TIMEOUT`, or
 `NW_CONNECT_RETRIES` to narrow, lengthen, or tune a run. When `DURATION` is set,
