@@ -144,6 +144,9 @@ To rerun the two-host productization matrix after the peer is reachable, use:
 SSH_TARGET=tmc2@10.0.18.249 \
   OUTPUT=/tmp/awdl-webrtc-matrix.txt \
   scripts/remote-matrix.sh
+
+go run ./cmd/matrix-summary /tmp/awdl-webrtc-matrix.txt \
+  > /tmp/awdl-webrtc-matrix-summary.md
 ```
 
 Before the matrix, capture the interface and route state from both Macs:
@@ -161,7 +164,9 @@ then builds a temporary local binary, copies it to `REMOTE_BIN` on the peer, and
 runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus Network.framework UDP
 perf, simultaneous bidirectional perf, latency, and callback probes. After
 setup, per-profile probes continue after failures and end with a matrix summary
-so one asymmetric UDP direction does not hide later evidence.
+so one asymmetric UDP direction does not hide later evidence. The
+`cmd/matrix-summary` command reads the saved transcript and renders the JSON
+perf/latency records as a compact Markdown table.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `OUTPUT`,
 `NW_CONNECT_TIMEOUT`, `NW_CONNECT_RETRIES`, or `LISTEN_IDLE_TIMEOUT` to narrow,

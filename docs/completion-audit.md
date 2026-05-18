@@ -21,7 +21,7 @@ do not complete requirements that need a fresh two-host run.
 | Full Pion-native backend | `github.com/tmc/apple-pion/nwtransport` implements Pion `transport.Net`; demo uses `-pion-net`; `RESULTS.md` records LAN, Thunderbolt, and AWDL historical datachannel success. | PASS | None for the packaged UDP transport backend. Broader TCP/TURN/STUN Network.framework ownership is explicitly out of this demo slice. |
 | Durable AWDL/link-local candidates | `github.com/tmc/apple-pion/icepolicy`; demo keeps SDP unmodified and publishes explicit `ICECandidateInit` records; tests cover raw candidate extraction. | PARTIAL | Re-run `-pion-net -mdns disabled -raw-candidates offer-ssh` on LAN, Thunderbolt, and AWDL once `tmc2` is reachable. |
 | Direction/asymmetry cleanup | `udp-callback-listen`, `udp-callback-request`, path policy checks, `nwpacket` readiness retries, `remote-diagnostics.sh`, matrix-local reachability diagnostics, and a simultaneous bidirectional UDP matrix step are implemented. | PARTIAL | Run `SSH_TARGET=tmc2@10.0.18.249 scripts/remote-diagnostics.sh`, then `REQUIRE_PATHS=1 SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh`; inspect callback, local-to-remote UDP, and bidirectional UDP sections. |
-| Performance hardening | `udp-perf` supports `-duration`, `-trials`, `-window`, `-streams`, `-packet-timeout`, `-listen-idle-timeout`, loss columns, JSON, latency mode, bidirectional matrix probing, and Network.framework path records. | PARTIAL | Run longer two-host matrix samples with `DURATION`, `TRIALS`, `WINDOW`, and `STREAMS` after remote reachability returns. |
+| Performance hardening | `udp-perf` supports `-duration`, `-trials`, `-window`, `-streams`, `-packet-timeout`, `-listen-idle-timeout`, loss columns, JSON, latency mode, bidirectional matrix probing, Network.framework path records, and `cmd/matrix-summary` Markdown summaries. | PARTIAL | Run longer two-host matrix samples with `DURATION`, `TRIALS`, `WINDOW`, and `STREAMS` after remote reachability returns, then summarize the transcript with `go run ./cmd/matrix-summary`. |
 | Reusable package split | `github.com/tmc/apple/x/network/nwpacket v0.6.7`; `github.com/tmc/apple-pion v0.1.0`; demo has no local replaces. | PASS | None. |
 | Repo hygiene | Demo and `apple-pion` worktrees are clean; owned `tmc/apple/x/network/nwpacket` is clean; release preflight passes. | PASS | Preserve unrelated dirty generated/private files in `tmc/apple`; they are outside this slice. |
 
@@ -41,10 +41,16 @@ SSH_TARGET=tmc2@10.0.18.249 \
 OUTPUT=/tmp/awdl-webrtc-matrix.txt \
 scripts/remote-matrix.sh
 
+go run ./cmd/matrix-summary /tmp/awdl-webrtc-matrix.txt \
+  > /tmp/awdl-webrtc-matrix-summary.md
+
 DURATION=10s TRIALS=5 WINDOW=8 STREAMS=2 REQUIRE_PATHS=1 \
 SSH_TARGET=tmc2@10.0.18.249 \
 OUTPUT=/tmp/awdl-webrtc-matrix-long.txt \
 scripts/remote-matrix.sh
+
+go run ./cmd/matrix-summary /tmp/awdl-webrtc-matrix-long.txt \
+  > /tmp/awdl-webrtc-matrix-long-summary.md
 ```
 
 The goal is not complete until the fresh remote matrix proves the raw-candidate
