@@ -162,8 +162,8 @@ func TestNewWireSignalPublishesRawCandidates(t *testing.T) {
 		}, "\n"),
 	}
 	signal := newWireSignal(desc, icepolicy.Policy{RawHostCandidates: true}, net.ParseIP("fe80::1"))
-	if strings.Contains(signal.Description.SDP, "a=candidate:") || strings.Contains(signal.Description.SDP, "a=end-of-candidates") {
-		t.Fatalf("description still contains candidates:\n%s", signal.Description.SDP)
+	if signal.Description.SDP != desc.SDP {
+		t.Fatalf("description SDP changed:\n%s", signal.Description.SDP)
 	}
 	if len(signal.Candidates) != 1 {
 		t.Fatalf("candidates = %d, want 1", len(signal.Candidates))

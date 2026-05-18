@@ -2556,7 +2556,6 @@ func newWireSignal(desc webrtc.SessionDescription, policy icepolicy.Policy, loca
 		return wireSignal{Description: desc}
 	}
 	candidates := icepolicy.CandidateInitsFromSDP(desc.SDP, policy, localIP)
-	desc.SDP = icepolicy.StripSDPCandidates(desc.SDP)
 	return wireSignal{Description: desc, Candidates: candidates}
 }
 
