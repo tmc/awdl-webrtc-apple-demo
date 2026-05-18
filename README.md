@@ -159,9 +159,9 @@ SSH_TARGET=tmc2@10.0.18.249 \
 The script records local reachability diagnostics for `SSH_TARGET`, checks SSH,
 then builds a temporary local binary, copies it to `REMOTE_BIN` on the peer, and
 runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus Network.framework UDP
-perf, latency, and callback probes in both directions. After setup, per-profile
-probes continue after failures and end with a matrix summary so one asymmetric
-UDP direction does not hide later evidence.
+perf, simultaneous bidirectional perf, latency, and callback probes. After
+setup, per-profile probes continue after failures and end with a matrix summary
+so one asymmetric UDP direction does not hide later evidence.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `OUTPUT`,
 `NW_CONNECT_TIMEOUT`, `NW_CONNECT_RETRIES`, or `LISTEN_IDLE_TIMEOUT` to narrow,
