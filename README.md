@@ -128,12 +128,14 @@ If a cold `udp` run times out, run `gather` first or use the two-host form.
 The `udp-perf` mode runs a small iperf-like request/echo benchmark over the
 same sockets and prints transfer, bitrate, datagram count, loss, and RTT
 summary columns. The `-warmup` packets are omitted from the summary, and
-`-trials` repeats the same run on one connection. `-window` sets the maximum
-number of in-flight echo requests for bounded pipelining; the default `1`
-preserves the serial request/echo behavior. Use `-perf-json` to also print one
-JSON result record per trial or listener summary. Echo timeouts are counted as
-lost datagrams after `-packet-timeout`, while write and corrupt-reply errors
-still fail the run. This is a smoke benchmark, not a replacement for `iperf3`.
+`-trials` repeats the same run on one connection and prints an aggregate
+summary when more than one trial runs. `-window` sets the maximum number of
+in-flight echo requests for bounded pipelining; the default `1` preserves the
+serial request/echo behavior. Use `-perf-json` to also print JSON result
+records per trial plus an aggregate summary or listener summary. Echo timeouts
+are counted as lost datagrams after `-packet-timeout`, while write and
+corrupt-reply errors still fail the run. This is a smoke benchmark, not a
+replacement for `iperf3`.
 
 For a two-host AWDL UDP proof, run the listener on one Mac:
 
