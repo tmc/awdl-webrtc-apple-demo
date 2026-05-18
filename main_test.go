@@ -13,6 +13,8 @@ import (
 
 	"github.com/pion/webrtc/v4"
 	"github.com/tmc/apple-pion/icepolicy"
+	applenetwork "github.com/tmc/apple/network"
+	"github.com/tmc/apple/x/network/nwpacket"
 )
 
 func TestShouldBindUDPToInterface(t *testing.T) {
@@ -249,6 +251,37 @@ func TestUDPLatencyRecordForTrial(t *testing.T) {
 	}
 	if _, err := json.Marshal(record); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUDPPathRecords(t *testing.T) {
+	result := udpPerfResult{
+		Count:   1,
+		Size:    64,
+		Streams: 1,
+		Elapsed: time.Millisecond,
+		RTT:     []time.Duration{time.Millisecond},
+		Paths: []nwpacket.Path{
+			{
+				Status: applenetwork.NWPathStatusSatisfied,
+				Interfaces: []nwpacket.PathInterface{
+					{Name: "awdl0", Index: 16, Type: applenetwork.NWInterfaceTypeWifi},
+				},
+			},
+		},
+	}
+	record := udpPerfRecordForTrial(result, 1, 1)
+	if len(record.Paths) != 1 || record.Paths[0].Status != "NWPathStatusSatisfied" {
+		t.Fatalf("paths = %#v", record.Paths)
+	}
+	if len(record.Paths[0].Interfaces) != 1 || record.Paths[0].Interfaces[0].Name != "awdl0" {
+		t.Fatalf("path interfaces = %#v", record.Paths)
+	}
+	if err := checkUDPPathPolicy(result, udpPathPolicy{RequireInterface: "awdl0"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkUDPPathPolicy(result, udpPathPolicy{RequireInterface: "en0"}); err == nil {
+		t.Fatal("checkUDPPathPolicy accepted missing interface")
 	}
 }
 

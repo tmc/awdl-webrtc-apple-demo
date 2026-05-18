@@ -6,7 +6,7 @@ require (
 	github.com/pion/ice/v4 v4.2.5
 	github.com/pion/transport/v4 v4.0.1
 	github.com/pion/webrtc/v4 v4.2.12
-	github.com/tmc/apple v0.6.5
+	github.com/tmc/apple v0.6.6
 	github.com/tmc/macgo v0.1.3
 	github.com/tmc/swiftui v0.0.0-20260512000920-5086d514a672
 	golang.org/x/sys v0.41.0

@@ -122,10 +122,16 @@ func main() {
 	streams := flag.Int("streams", 1, "UDP perf concurrent stream count")
 	packetTimeout := flag.Duration("packet-timeout", time.Second, "UDP perf per-datagram echo timeout")
 	perfJSON := flag.Bool("perf-json", false, "also print UDP perf result records as JSON lines")
+	requirePathInterface := flag.String("require-path-interface", "", "require UDP perf Network.framework path to include this interface")
+	forbidLoopbackPath := flag.Bool("forbid-loopback-path", false, "fail UDP perf if the Network.framework path uses loopback")
 	uiInterval := flag.Duration("ui-interval", 3*time.Second, "SwiftUI link monitor sample interval")
 	uiCount := flag.Int("ui-count", 20, "SwiftUI link monitor datagrams per sample")
 	uiWindow := flag.Int("ui-window", 4, "SwiftUI link monitor maximum in-flight datagrams per sample")
 	flag.Parse()
+	pathPolicy := udpPathPolicy{
+		RequireInterface: strings.TrimSpace(*requirePathInterface),
+		ForbidLoopback:   *forbidLoopbackPath,
+	}
 
 	profile, err := profileByName(*profileName)
 	if err != nil {
@@ -239,7 +245,7 @@ func main() {
 		})
 	case "udp-perf":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return udpPerf(ctx, profile, iface, backend, *count, *size, *warmup, *trials, *window, *streams, *packetTimeout, *duration, *perfJSON)
+			return udpPerf(ctx, profile, iface, backend, *count, *size, *warmup, *trials, *window, *streams, *packetTimeout, *duration, *perfJSON, pathPolicy)
 		})
 	case "udp-perf-listen":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
@@ -251,15 +257,15 @@ func main() {
 		})
 	case "udp-perf-send":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return udpPerfSend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials, *window, *streams, *packetTimeout, *duration, *perfJSON)
+			return udpPerfSend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials, *window, *streams, *packetTimeout, *duration, *perfJSON, pathPolicy)
 		})
 	case "udp-latency":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return udpLatency(ctx, profile, iface, backend, *count, *size, *warmup, *trials, *streams, *packetTimeout, *duration, *perfJSON)
+			return udpLatency(ctx, profile, iface, backend, *count, *size, *warmup, *trials, *streams, *packetTimeout, *duration, *perfJSON, pathPolicy)
 		})
 	case "udp-latency-send":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return udpLatencySend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials, *streams, *packetTimeout, *duration, *perfJSON)
+			return udpLatencySend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials, *streams, *packetTimeout, *duration, *perfJSON, pathPolicy)
 		})
 	case "ui":
 		if err := runLinkHealthUI(context.Background(), linkHealthConfig{
@@ -1045,56 +1051,75 @@ type udpPerfResult struct {
 	Warmup   int
 	Window   int
 	Streams  int
+	Paths    []nwpacket.Path
 	Lost     int
 	Elapsed  time.Duration
 	RTT      []time.Duration
 }
 
+type udpPathPolicy struct {
+	RequireInterface string
+	ForbidLoopback   bool
+}
+
+type udpPathRecord struct {
+	Status     string                   `json:"status"`
+	Interfaces []udpPathInterfaceRecord `json:"interfaces,omitempty"`
+}
+
+type udpPathInterfaceRecord struct {
+	Name  string `json:"name"`
+	Index uint32 `json:"index,omitempty"`
+	Type  string `json:"type"`
+}
+
 type udpPerfRecord struct {
-	Kind          string  `json:"kind"`
-	Trial         int     `json:"trial,omitempty"`
-	Trials        int     `json:"trials,omitempty"`
-	Count         int     `json:"count,omitempty"`
-	Size          int     `json:"size,omitempty"`
-	DurationNS    int64   `json:"duration_ns,omitempty"`
-	Warmup        int     `json:"warmup,omitempty"`
-	Window        int     `json:"window,omitempty"`
-	Streams       int     `json:"streams,omitempty"`
-	Datagrams     int     `json:"datagrams"`
-	Lost          int     `json:"lost"`
-	LossPercent   float64 `json:"loss_percent"`
-	TransferBytes int64   `json:"transfer_bytes"`
-	BitrateBPS    float64 `json:"bitrate_bps"`
-	ElapsedNS     int64   `json:"elapsed_ns"`
-	RTTMinNS      int64   `json:"rtt_min_ns"`
-	RTTAvgNS      int64   `json:"rtt_avg_ns"`
-	RTTP50NS      int64   `json:"rtt_p50_ns"`
-	RTTP95NS      int64   `json:"rtt_p95_ns"`
-	RTTMaxNS      int64   `json:"rtt_max_ns"`
-	Expected      int64   `json:"expected,omitempty"`
+	Kind          string          `json:"kind"`
+	Trial         int             `json:"trial,omitempty"`
+	Trials        int             `json:"trials,omitempty"`
+	Count         int             `json:"count,omitempty"`
+	Size          int             `json:"size,omitempty"`
+	DurationNS    int64           `json:"duration_ns,omitempty"`
+	Warmup        int             `json:"warmup,omitempty"`
+	Window        int             `json:"window,omitempty"`
+	Streams       int             `json:"streams,omitempty"`
+	Datagrams     int             `json:"datagrams"`
+	Lost          int             `json:"lost"`
+	LossPercent   float64         `json:"loss_percent"`
+	TransferBytes int64           `json:"transfer_bytes"`
+	BitrateBPS    float64         `json:"bitrate_bps"`
+	ElapsedNS     int64           `json:"elapsed_ns"`
+	RTTMinNS      int64           `json:"rtt_min_ns"`
+	RTTAvgNS      int64           `json:"rtt_avg_ns"`
+	RTTP50NS      int64           `json:"rtt_p50_ns"`
+	RTTP95NS      int64           `json:"rtt_p95_ns"`
+	RTTMaxNS      int64           `json:"rtt_max_ns"`
+	Expected      int64           `json:"expected,omitempty"`
+	Paths         []udpPathRecord `json:"paths,omitempty"`
 }
 
 type udpLatencyRecord struct {
-	Kind        string  `json:"kind"`
-	Trial       int     `json:"trial,omitempty"`
-	Trials      int     `json:"trials,omitempty"`
-	Count       int     `json:"count,omitempty"`
-	Size        int     `json:"size,omitempty"`
-	DurationNS  int64   `json:"duration_ns,omitempty"`
-	Warmup      int     `json:"warmup,omitempty"`
-	Streams     int     `json:"streams,omitempty"`
-	Datagrams   int     `json:"datagrams"`
-	Lost        int     `json:"lost"`
-	LossPercent float64 `json:"loss_percent"`
-	ElapsedNS   int64   `json:"elapsed_ns"`
-	RTTMinNS    int64   `json:"rtt_min_ns"`
-	RTTAvgNS    int64   `json:"rtt_avg_ns"`
-	RTTP50NS    int64   `json:"rtt_p50_ns"`
-	RTTP95NS    int64   `json:"rtt_p95_ns"`
-	RTTMaxNS    int64   `json:"rtt_max_ns"`
+	Kind        string          `json:"kind"`
+	Trial       int             `json:"trial,omitempty"`
+	Trials      int             `json:"trials,omitempty"`
+	Count       int             `json:"count,omitempty"`
+	Size        int             `json:"size,omitempty"`
+	DurationNS  int64           `json:"duration_ns,omitempty"`
+	Warmup      int             `json:"warmup,omitempty"`
+	Streams     int             `json:"streams,omitempty"`
+	Datagrams   int             `json:"datagrams"`
+	Lost        int             `json:"lost"`
+	LossPercent float64         `json:"loss_percent"`
+	ElapsedNS   int64           `json:"elapsed_ns"`
+	RTTMinNS    int64           `json:"rtt_min_ns"`
+	RTTAvgNS    int64           `json:"rtt_avg_ns"`
+	RTTP50NS    int64           `json:"rtt_p50_ns"`
+	RTTP95NS    int64           `json:"rtt_p95_ns"`
+	RTTMaxNS    int64           `json:"rtt_max_ns"`
+	Paths       []udpPathRecord `json:"paths,omitempty"`
 }
 
-func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup, trials, window, streams int, packetTimeout, duration time.Duration, jsonOut bool) error {
+func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup, trials, window, streams int, packetTimeout, duration time.Duration, jsonOut bool, pathPolicy udpPathPolicy) error {
 	if trials <= 0 {
 		return errors.New("udp perf -trials must be positive")
 	}
@@ -1143,6 +1168,9 @@ func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, back
 		}
 		result, err := runUDPEchoPerfStreams(ctx, clients, serverAddr, count, size, warmup, window, packetTimeout, duration)
 		if err != nil {
+			return err
+		}
+		if err := checkUDPPathPolicy(result, pathPolicy); err != nil {
 			return err
 		}
 		printUDPPerf(result)
@@ -1205,7 +1233,7 @@ func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface
 	}
 }
 
-func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup, trials, window, streams int, packetTimeout, duration time.Duration, jsonOut bool) error {
+func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup, trials, window, streams int, packetTimeout, duration time.Duration, jsonOut bool, pathPolicy udpPathPolicy) error {
 	if peer == "" {
 		return errors.New("missing -peer for udp-perf-send")
 	}
@@ -1248,6 +1276,9 @@ func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, 
 		if err != nil {
 			return err
 		}
+		if err := checkUDPPathPolicy(result, pathPolicy); err != nil {
+			return err
+		}
 		printUDPPerf(result)
 		if jsonOut {
 			printJSON(udpPerfRecordForTrial(result, trial, trials))
@@ -1258,7 +1289,7 @@ func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, 
 	return nil
 }
 
-func udpLatency(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup, trials, streams int, packetTimeout, duration time.Duration, jsonOut bool) error {
+func udpLatency(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup, trials, streams int, packetTimeout, duration time.Duration, jsonOut bool, pathPolicy udpPathPolicy) error {
 	if trials <= 0 {
 		return errors.New("udp latency -trials must be positive")
 	}
@@ -1306,6 +1337,9 @@ func udpLatency(ctx context.Context, profile linkProfile, iface linkInterface, b
 		if err != nil {
 			return err
 		}
+		if err := checkUDPPathPolicy(result, pathPolicy); err != nil {
+			return err
+		}
 		printUDPLatency(result)
 		if jsonOut {
 			printJSON(udpLatencyRecordForTrial(result, trial, trials))
@@ -1322,7 +1356,7 @@ func udpLatency(ctx context.Context, profile linkProfile, iface linkInterface, b
 	return nil
 }
 
-func udpLatencySend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup, trials, streams int, packetTimeout, duration time.Duration, jsonOut bool) error {
+func udpLatencySend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup, trials, streams int, packetTimeout, duration time.Duration, jsonOut bool, pathPolicy udpPathPolicy) error {
 	if peer == "" {
 		return errors.New("missing -peer for udp-latency-send")
 	}
@@ -1360,6 +1394,9 @@ func udpLatencySend(ctx context.Context, profile linkProfile, iface linkInterfac
 		}
 		result, err := runUDPEchoPerfStreams(ctx, conns, addr, count, size, warmup, 1, packetTimeout, duration)
 		if err != nil {
+			return err
+		}
+		if err := checkUDPPathPolicy(result, pathPolicy); err != nil {
 			return err
 		}
 		printUDPLatency(result)
@@ -1466,6 +1503,7 @@ func runUDPEchoPerfStreams(ctx context.Context, conns []net.PacketConn, addr net
 		out.Warmup += item.Result.Warmup
 		out.Lost += item.Result.Lost
 		out.RTT = append(out.RTT, item.Result.RTT...)
+		out.Paths = appendUDPPaths(out.Paths, item.Result.Paths...)
 	}
 	if firstErr != nil {
 		return udpPerfResult{}, firstErr
@@ -1545,6 +1583,7 @@ func runUDPEchoPerf(ctx context.Context, conn net.PacketConn, addr net.Addr, cou
 		Warmup:   warmup,
 		Window:   window,
 		Streams:  1,
+		Paths:    packetConnPaths(conn, addr),
 		Lost:     lost,
 		Elapsed:  time.Since(start),
 		RTT:      rtt,
@@ -1846,6 +1885,7 @@ func udpPerfRecordForTrial(result udpPerfResult, trial, trials int) udpPerfRecor
 		TransferBytes: bytes,
 		BitrateBPS:    bitrateBPS(bytes, result.Elapsed),
 		ElapsedNS:     result.Elapsed.Nanoseconds(),
+		Paths:         udpPathRecords(result.Paths),
 	}
 	if success == 0 {
 		return record
@@ -1879,6 +1919,7 @@ func udpLatencyRecordForTrial(result udpPerfResult, trial, trials int) udpLatenc
 		Lost:        result.Lost,
 		LossPercent: lossPercent(int64(result.Lost), int64(result.Count)),
 		ElapsedNS:   result.Elapsed.Nanoseconds(),
+		Paths:       udpPathRecords(result.Paths),
 	}
 	if success == 0 {
 		return record
@@ -1911,8 +1952,59 @@ func aggregateUDPPerfResults(results []udpPerfResult) udpPerfResult {
 		out.Lost += result.Lost
 		out.Elapsed += result.Elapsed
 		out.RTT = append(out.RTT, result.RTT...)
+		out.Paths = appendUDPPaths(out.Paths, result.Paths...)
 	}
 	return out
+}
+
+func packetConnPaths(conn net.PacketConn, addr net.Addr) []nwpacket.Path {
+	reporter, ok := conn.(nwpacket.PathReporter)
+	if !ok {
+		return nil
+	}
+	path, err := reporter.PeerPath(addr)
+	if err != nil {
+		return nil
+	}
+	return []nwpacket.Path{path}
+}
+
+func appendUDPPaths(paths []nwpacket.Path, add ...nwpacket.Path) []nwpacket.Path {
+	for _, path := range add {
+		var found bool
+		for _, existing := range paths {
+			if existing.String() == path.String() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
+func checkUDPPathPolicy(result udpPerfResult, policy udpPathPolicy) error {
+	if policy.RequireInterface == "" && !policy.ForbidLoopback {
+		return nil
+	}
+	if len(result.Paths) == 0 {
+		return errors.New("udp path policy requested but no Network.framework path was reported")
+	}
+	for _, path := range result.Paths {
+		if policy.RequireInterface != "" && !path.UsesInterface(policy.RequireInterface) {
+			return fmt.Errorf("udp path %s does not include required interface %s", path, policy.RequireInterface)
+		}
+		if policy.ForbidLoopback {
+			for _, iface := range path.Interfaces {
+				if iface.Type == applenetwork.NWInterfaceTypeLoopback {
+					return fmt.Errorf("udp path %s uses loopback", path)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func durationSuffix(duration time.Duration) string {
@@ -1932,6 +2024,25 @@ func udpLatencyRecordForSummary(result udpPerfResult, trials int) udpLatencyReco
 	record := udpLatencyRecordForTrial(result, 0, trials)
 	record.Kind = "udp_latency_summary"
 	return record
+}
+
+func udpPathRecords(paths []nwpacket.Path) []udpPathRecord {
+	if len(paths) == 0 {
+		return nil
+	}
+	records := make([]udpPathRecord, 0, len(paths))
+	for _, path := range paths {
+		record := udpPathRecord{Status: path.Status.String()}
+		for _, iface := range path.Interfaces {
+			record.Interfaces = append(record.Interfaces, udpPathInterfaceRecord{
+				Name:  iface.Name,
+				Index: iface.Index,
+				Type:  iface.Type.String(),
+			})
+		}
+		records = append(records, record)
+	}
+	return records
 }
 
 func udpPerfListenRecord(packets, bytes int64, elapsed time.Duration, expected int64) udpPerfRecord {

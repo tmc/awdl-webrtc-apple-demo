@@ -15,6 +15,10 @@ streams=${STREAMS:-1}
 timeout=${TIMEOUT:-45s}
 message=${MESSAGE:-callback}
 connect_timeout=${CONNECT_TIMEOUT:-5}
+require_paths=${REQUIRE_PATHS:-0}
+lan_path_interface=${LAN_PATH_INTERFACE:-en0}
+awdl_path_interface=${AWDL_PATH_INTERFACE:-awdl0}
+thunderbolt_path_interface=${THUNDERBOLT_PATH_INTERFACE:-}
 
 sq() {
 	local s=${1//\'/\'\\\'\'}
@@ -75,6 +79,48 @@ remote() {
 	run ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$cmd"
 }
 
+path_interface_for_profile() {
+	case "$1" in
+	lan)
+		printf '%s\n' "$lan_path_interface"
+		;;
+	awdl)
+		printf '%s\n' "$awdl_path_interface"
+		;;
+	thunderbolt)
+		printf '%s\n' "$thunderbolt_path_interface"
+		;;
+	*)
+		printf '\n'
+		;;
+	esac
+}
+
+remote_path_args() {
+	if [[ $require_paths != 1 ]]; then
+		return
+	fi
+	local iface
+	iface=$(path_interface_for_profile "$1")
+	if [[ -n $iface ]]; then
+		printf ' -require-path-interface %s' "$(sq "$iface")"
+	fi
+	printf ' -forbid-loopback-path'
+}
+
+append_local_path_args() {
+	if [[ $require_paths != 1 ]]; then
+		return
+	fi
+	local profile=$1
+	local iface
+	iface=$(path_interface_for_profile "$profile")
+	if [[ -n $iface ]]; then
+		local_args+=(-require-path-interface "$iface")
+	fi
+	local_args+=(-forbid-loopback-path)
+}
+
 remote_send() {
 	local profile=$1
 	local peer=$2
@@ -82,7 +128,7 @@ remote_send() {
 	if [[ -n $duration ]]; then
 		duration_arg=" -duration $(sq "$duration")"
 	fi
-	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-perf-send -peer $(sq "$peer") -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -window $(sq "$window") -streams $(sq "$streams") -perf-json -timeout $(sq "$timeout")"
+	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-perf-send -peer $(sq "$peer") -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -window $(sq "$window") -streams $(sq "$streams") -perf-json$(remote_path_args "$profile") -timeout $(sq "$timeout")"
 }
 
 remote_latency_send() {
@@ -92,27 +138,29 @@ remote_latency_send() {
 	if [[ -n $duration ]]; then
 		duration_arg=" -duration $(sq "$duration")"
 	fi
-	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-latency-send -peer $(sq "$peer") -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -streams $(sq "$streams") -perf-json -timeout $(sq "$timeout")"
+	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-latency-send -peer $(sq "$peer") -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -streams $(sq "$streams") -perf-json$(remote_path_args "$profile") -timeout $(sq "$timeout")"
 }
 
 local_send() {
 	local profile=$1
 	local peer=$2
-	local args=()
+	local local_args=()
 	if [[ -n $duration ]]; then
-		args=(-duration "$duration")
+		local_args=(-duration "$duration")
 	fi
-	run "$local_bin" -profile "$profile" -backend network -mode udp-perf-send -peer "$peer" -count "$count" "${args[@]}" -warmup "$warmup" -size "$size" -trials "$trials" -window "$window" -streams "$streams" -perf-json -timeout "$timeout"
+	append_local_path_args "$profile"
+	run "$local_bin" -profile "$profile" -backend network -mode udp-perf-send -peer "$peer" -count "$count" "${local_args[@]}" -warmup "$warmup" -size "$size" -trials "$trials" -window "$window" -streams "$streams" -perf-json -timeout "$timeout"
 }
 
 local_latency_send() {
 	local profile=$1
 	local peer=$2
-	local args=()
+	local local_args=()
 	if [[ -n $duration ]]; then
-		args=(-duration "$duration")
+		local_args=(-duration "$duration")
 	fi
-	run "$local_bin" -profile "$profile" -backend network -mode udp-latency-send -peer "$peer" -count "$count" "${args[@]}" -warmup "$warmup" -size "$size" -trials "$trials" -streams "$streams" -perf-json -timeout "$timeout"
+	append_local_path_args "$profile"
+	run "$local_bin" -profile "$profile" -backend network -mode udp-latency-send -peer "$peer" -count "$count" "${local_args[@]}" -warmup "$warmup" -size "$size" -trials "$trials" -streams "$streams" -perf-json -timeout "$timeout"
 }
 
 run_local_listener_then_remote_sender() {
