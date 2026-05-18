@@ -79,19 +79,39 @@ require_no_replace() {
 	fi
 }
 
+require_published_module() {
+	local repo=$1
+	local name=$2
+	local module=$3
+	local modcache version dir
+	modcache=$(GOWORK=off go env GOMODCACHE)
+	version=$(GOWORK=off go -C "$repo" list -m -f '{{.Version}}' "$module")
+	dir=$(GOWORK=off go -C "$repo" list -m -f '{{.Dir}}' "$module")
+	printf '%s %s version=%s dir=%s\n' "$name" "$module" "$version" "$dir"
+	if [[ -z $version || $version == "<nil>" ]]; then
+		fail "$name uses an unpublished $module version"
+	fi
+	case "$dir/" in
+	"$modcache"/*) ;;
+	*) fail "$name resolves $module outside GOMODCACHE: $dir" ;;
+	esac
+}
+
 section "local gates"
 run bash -n "$demo_dir/scripts/remote-matrix.sh"
-run go -C "$demo_dir" test ./...
-run go -C "$demo_dir" vet ./...
-run go -C "$apple_pion_dir" test ./...
-run go -C "$apple_pion_dir" vet ./...
+run env GOWORK=off go -C "$demo_dir" test ./...
+run env GOWORK=off go -C "$demo_dir" vet ./...
+run env GOWORK=off go -C "$apple_pion_dir" test ./...
+run env GOWORK=off go -C "$apple_pion_dir" vet ./...
 run go -C "$apple_dir" test ./x/network/nwpacket
 run go -C "$apple_dir" vet ./x/network/nwpacket
 
 section "package availability"
+run env GOWORK=off go -C "$apple_pion_dir" list ./...
+run env GOWORK=off go -C "$demo_dir" list ./...
+require_published_module "$demo_dir" "awdl-webrtc-apple-demo" "github.com/tmc/apple"
+require_published_module "$apple_pion_dir" "apple-pion" "github.com/tmc/apple"
 run go -C "$apple_dir" list ./x/network/nwpacket
-run go -C "$apple_pion_dir" list ./...
-run go -C "$demo_dir" list ./...
 
 section "worktree state"
 require_clean "$demo_dir" "awdl-webrtc-apple-demo"
