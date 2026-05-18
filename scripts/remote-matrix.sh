@@ -551,7 +551,13 @@ printf 'output=%s\n' "$output"
 diagnose_local_reachability
 
 printf '## remote reachability\n'
-remote "true"
+if remote "true"; then
+	:
+else
+	rc=$?
+	printf 'FAIL: remote reachability exit=%d\n' "$rc" >&2
+	exit "$rc"
+fi
 
 printf '## build local binary\n'
 run go build -o "$local_bin" .
