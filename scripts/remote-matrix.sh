@@ -318,6 +318,55 @@ run_remote_listener_then_local_latency() {
 	return "$rc"
 }
 
+run_bidirectional_perf() {
+	local profile=$1
+	local duration_arg=
+	local local_args=()
+	if [[ -n $duration ]]; then
+		duration_arg=" -duration $(sq "$duration")"
+		local_args=(-duration "$duration")
+	fi
+	local_args+=(-nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries")
+	local_args+=(-listen-idle-timeout "$listen_idle_timeout")
+	local local_log remote_log local_send_log remote_send_log
+	local_log=$(mktemp)
+	remote_log=$(mktemp)
+	local_send_log=$(mktemp)
+	remote_send_log=$(mktemp)
+	printf '## %s bidirectional UDP perf\n' "$profile"
+	"$local_bin" -profile "$profile" -backend network -mode udp-perf-listen -count "$count" "${local_args[@]}" -warmup "$warmup" -trials "$trials" -streams "$streams" -perf-json -timeout "$timeout" >"$local_log" 2>&1 &
+	local local_listener_pid=$!
+	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -listen-idle-timeout $(sq "$listen_idle_timeout") -perf-json -timeout $(sq "$timeout")" >"$remote_log" 2>&1 &
+	local remote_listener_pid=$!
+	local local_peer remote_peer
+	if ! local_peer=$(wait_for_peer "$local_log" "local bidirectional $profile"); then
+		kill "$local_listener_pid" "$remote_listener_pid" 2>/dev/null || true
+		wait "$local_listener_pid" "$remote_listener_pid" 2>/dev/null || true
+		cat "$local_log" "$remote_log" "$local_send_log" "$remote_send_log"
+		rm -f "$local_log" "$remote_log" "$local_send_log" "$remote_send_log"
+		return 1
+	fi
+	if ! remote_peer=$(wait_for_peer "$remote_log" "remote bidirectional $profile"); then
+		kill "$local_listener_pid" "$remote_listener_pid" 2>/dev/null || true
+		wait "$local_listener_pid" "$remote_listener_pid" 2>/dev/null || true
+		cat "$local_log" "$remote_log" "$local_send_log" "$remote_send_log"
+		rm -f "$local_log" "$remote_log" "$local_send_log" "$remote_send_log"
+		return 1
+	fi
+	local_send "$profile" "$remote_peer" >"$local_send_log" 2>&1 &
+	local local_sender_pid=$!
+	remote_send "$profile" "$local_peer" >"$remote_send_log" 2>&1 &
+	local remote_sender_pid=$!
+	local rc=0
+	wait "$local_sender_pid" || rc=$?
+	wait "$remote_sender_pid" || rc=$?
+	wait "$local_listener_pid" || rc=$?
+	wait "$remote_listener_pid" || rc=$?
+	cat "$local_send_log" "$remote_send_log" "$local_log" "$remote_log"
+	rm -f "$local_log" "$remote_log" "$local_send_log" "$remote_send_log"
+	return "$rc"
+}
+
 run_local_callback_then_remote_request() {
 	local profile=$1
 	local log
@@ -420,6 +469,7 @@ for profile in $profiles; do
 
 	record_matrix_step "$profile remote-to-local UDP perf" run_local_listener_then_remote_sender "$profile"
 	record_matrix_step "$profile local-to-remote UDP perf" run_remote_listener_then_local_sender "$profile"
+	record_matrix_step "$profile bidirectional UDP perf" run_bidirectional_perf "$profile"
 	record_matrix_step "$profile remote-to-local UDP latency" run_local_listener_then_remote_latency "$profile"
 	record_matrix_step "$profile local-to-remote UDP latency" run_remote_listener_then_local_latency "$profile"
 	record_matrix_step "$profile callback remote-to-local request" run_local_callback_then_remote_request "$profile"
