@@ -20,12 +20,14 @@ import (
 	"time"
 
 	"github.com/pion/ice/v4"
+	piontransport "github.com/pion/transport/v4"
 	"github.com/pion/webrtc/v4"
 	applenetwork "github.com/tmc/apple/network"
 	"github.com/tmc/apple/objc"
 	"github.com/tmc/apple/objectivec"
 	"github.com/tmc/awdl-webrtc-apple-demo/internal/icepolicy"
 	"github.com/tmc/awdl-webrtc-apple-demo/nwpacket"
+	"github.com/tmc/awdl-webrtc-apple-demo/nwtransport"
 	"golang.org/x/sys/unix"
 )
 
@@ -82,6 +84,15 @@ type linkPacketConn struct {
 	backend udpBackend
 }
 
+type linkWebRTCNet struct {
+	mux     *linkUDPMux
+	net     piontransport.Net
+	ip      net.IP
+	network string
+	bound   bool
+	backend udpBackend
+}
+
 type udpBackend string
 
 const (
@@ -93,6 +104,7 @@ func main() {
 	profileName := flag.String("profile", "awdl", "link profile: awdl, thunderbolt, or lan")
 	ifaceName := flag.String("iface", "", "network interface to constrain ICE candidates to; default depends on profile")
 	backendName := flag.String("backend", string(udpBackendGo), "UDP backend: go or network")
+	pionNet := flag.Bool("pion-net", false, "use Network.framework as Pion transport.Net instead of ICE UDP mux")
 	mdnsName := flag.String("mdns", "query-and-gather", "ICE mDNS mode: query-and-gather, query-only, or disabled")
 	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-ssh, udp, udp-listen, udp-send, udp-perf, udp-perf-listen, or udp-perf-send")
 	timeout := flag.Duration("timeout", 8*time.Second, "timeout for WebRTC and UDP modes")
@@ -114,6 +126,9 @@ func main() {
 	backend, err := parseUDPBackend(*backendName)
 	if err != nil {
 		fail(err)
+	}
+	if *pionNet && backend != udpBackendNetwork {
+		fail(errors.New("-pion-net requires -backend network"))
 	}
 	mdnsMode, err := parseMDNSMode(*mdnsName)
 	if err != nil {
@@ -177,21 +192,21 @@ func main() {
 
 	switch *mode {
 	case "check":
-		fmt.Printf("pion webrtc interface_filter=%s network_types=udp4,udp6 mdns=%s udp_backend=%s\n", iface.Name, mdnsModeString(mdnsMode), backend)
+		fmt.Printf("pion webrtc interface_filter=%s network_types=udp4,udp6 mdns=%s udp_backend=%s pion_net=%t\n", iface.Name, mdnsModeString(mdnsMode), backend, *pionNet)
 	case "gather":
-		if err := gather(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, candidatePolicy); err != nil {
+		if err := gather(ctxWithTimeout(*timeout), profile, iface, backend, *pionNet, mdnsMode, candidatePolicy); err != nil {
 			fail(err)
 		}
 	case "pair":
-		if err := pair(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, candidatePolicy); err != nil {
+		if err := pair(ctxWithTimeout(*timeout), profile, iface, backend, *pionNet, mdnsMode, candidatePolicy); err != nil {
 			fail(err)
 		}
 	case "answer-stdio":
-		if err := answerStdio(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, candidatePolicy); err != nil {
+		if err := answerStdio(ctxWithTimeout(*timeout), profile, iface, backend, *pionNet, mdnsMode, candidatePolicy); err != nil {
 			fail(err)
 		}
 	case "offer-ssh":
-		if err := offerSSH(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, candidatePolicy, *timeout, *sshTarget, *remoteBin); err != nil {
+		if err := offerSSH(ctxWithTimeout(*timeout), profile, iface, backend, *pionNet, mdnsMode, candidatePolicy, *timeout, *sshTarget, *remoteBin); err != nil {
 			fail(err)
 		}
 	case "udp":
@@ -436,15 +451,14 @@ func addrIP(addr net.Addr) net.IP {
 	}
 }
 
-func gather(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) error {
-	mux, err := newLinkUDPMux(profile, iface, backend)
+func gather(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, usePionNet bool, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) error {
+	link, err := newLinkWebRTCNet(profile, iface, backend, usePionNet)
 	if err != nil {
 		return err
 	}
-	defer mux.Close()
-	fmt.Printf("udp mux listen=%s network=%s backend=%s bound_if=%s mdns=%s raw_candidates=%t\n",
-		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), candidatePolicy.RawHostCandidates)
-	pc, err := newPeer(iface, mux, mdnsMode, candidatePolicy)
+	defer link.Close()
+	link.print("gather", iface, mdnsMode, candidatePolicy)
+	pc, err := newPeer(iface, link, mdnsMode, candidatePolicy)
 	if err != nil {
 		return err
 	}
@@ -470,7 +484,7 @@ func gather(ctx context.Context, profile linkProfile, iface linkInterface, backe
 		return errors.New("missing local description after gather")
 	}
 	sdp := desc.SDP
-	sdp = candidatePolicy.Publish(sdp, mux.ip)
+	sdp = candidatePolicy.Publish(sdp, link.ip)
 	candidates := candidateLines(sdp)
 	if len(candidates) == 0 {
 		return fmt.Errorf("no ICE candidates gathered for %s", iface.Name)
@@ -481,32 +495,34 @@ func gather(ctx context.Context, profile linkProfile, iface linkInterface, backe
 	if len(iface.IPs) != 0 && !candidatesUseInterface(candidates, iface.IPs) {
 		return fmt.Errorf("gathered candidate outside %s IP set %s or mDNS publication", iface.Name, ipList(iface.IPs))
 	}
+	if link.net != nil {
+		fmt.Printf("gathered %d host candidate(s) from %s-bound Pion transport.Net\n", len(candidates), iface.Name)
+		return nil
+	}
 	fmt.Printf("gathered %d host candidate(s) from %s-bound UDP mux\n", len(candidates), iface.Name)
 	return nil
 }
 
-func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) error {
-	leftMux, err := newLinkUDPMux(profile, iface, backend)
+func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, usePionNet bool, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) error {
+	leftLink, err := newLinkWebRTCNet(profile, iface, backend, usePionNet)
 	if err != nil {
 		return err
 	}
-	defer leftMux.Close()
-	rightMux, err := newLinkUDPMux(profile, iface, backend)
+	defer leftLink.Close()
+	rightLink, err := newLinkWebRTCNet(profile, iface, backend, usePionNet)
 	if err != nil {
 		return err
 	}
-	defer rightMux.Close()
-	fmt.Printf("left udp mux listen=%s network=%s backend=%s bound_if=%s\n",
-		leftMux.conn.LocalAddr(), leftMux.network, leftMux.backend, boundIfString(iface, leftMux.bound))
-	fmt.Printf("right udp mux listen=%s network=%s backend=%s bound_if=%s\n",
-		rightMux.conn.LocalAddr(), rightMux.network, rightMux.backend, boundIfString(iface, rightMux.bound))
+	defer rightLink.Close()
+	leftLink.print("left", iface, mdnsMode, candidatePolicy)
+	rightLink.print("right", iface, mdnsMode, candidatePolicy)
 
-	left, err := newPeer(iface, leftMux, mdnsMode, candidatePolicy)
+	left, err := newPeer(iface, leftLink, mdnsMode, candidatePolicy)
 	if err != nil {
 		return err
 	}
 	defer left.Close()
-	right, err := newPeer(iface, rightMux, mdnsMode, candidatePolicy)
+	right, err := newPeer(iface, rightLink, mdnsMode, candidatePolicy)
 	if err != nil {
 		return err
 	}
@@ -531,8 +547,8 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 
 	if err := signalNonTrickle(left, right, ctx, signalOptions{
 		CandidatePolicy: candidatePolicy,
-		LeftIP:          leftMux.ip,
-		RightIP:         rightMux.ip,
+		LeftIP:          leftLink.ip,
+		RightIP:         rightLink.ip,
 	}); err != nil {
 		return err
 	}
@@ -553,16 +569,15 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 	}
 }
 
-func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) error {
-	mux, err := newLinkUDPMux(profile, iface, backend)
+func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, usePionNet bool, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) error {
+	link, err := newLinkWebRTCNet(profile, iface, backend, usePionNet)
 	if err != nil {
 		return err
 	}
-	defer mux.Close()
-	fmt.Printf("answer udp mux listen=%s network=%s backend=%s bound_if=%s mdns=%s raw_candidates=%t\n",
-		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), candidatePolicy.RawHostCandidates)
+	defer link.Close()
+	link.print("answer", iface, mdnsMode, candidatePolicy)
 
-	pc, err := newPeer(iface, mux, mdnsMode, candidatePolicy)
+	pc, err := newPeer(iface, link, mdnsMode, candidatePolicy)
 	if err != nil {
 		return err
 	}
@@ -595,7 +610,7 @@ func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, 
 		return err
 	}
 	desc := *pc.LocalDescription()
-	desc.SDP = candidatePolicy.Publish(desc.SDP, mux.ip)
+	desc.SDP = candidatePolicy.Publish(desc.SDP, link.ip)
 	wire, err := encodeWireDescription(desc)
 	if err != nil {
 		return err
@@ -612,19 +627,18 @@ func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, 
 	}
 }
 
-func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy, timeout time.Duration, sshTarget, remoteBin string) error {
+func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, usePionNet bool, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy, timeout time.Duration, sshTarget, remoteBin string) error {
 	if sshTarget == "" {
 		return errors.New("missing -ssh for offer-ssh")
 	}
-	mux, err := newLinkUDPMux(profile, iface, backend)
+	link, err := newLinkWebRTCNet(profile, iface, backend, usePionNet)
 	if err != nil {
 		return err
 	}
-	defer mux.Close()
-	fmt.Printf("offer udp mux listen=%s network=%s backend=%s bound_if=%s mdns=%s raw_candidates=%t\n",
-		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), candidatePolicy.RawHostCandidates)
+	defer link.Close()
+	link.print("offer", iface, mdnsMode, candidatePolicy)
 
-	pc, err := newPeer(iface, mux, mdnsMode, candidatePolicy)
+	pc, err := newPeer(iface, link, mdnsMode, candidatePolicy)
 	if err != nil {
 		return err
 	}
@@ -656,7 +670,7 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 		return err
 	}
 	desc := *pc.LocalDescription()
-	desc.SDP = candidatePolicy.Publish(desc.SDP, mux.ip)
+	desc.SDP = candidatePolicy.Publish(desc.SDP, link.ip)
 	wireOffer, err := encodeWireDescription(desc)
 	if err != nil {
 		return err
@@ -674,6 +688,9 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 	}
 	if candidatePolicy.RawHostCandidates {
 		cmdArgs = append(cmdArgs, "-raw-candidates")
+	}
+	if usePionNet {
+		cmdArgs = append(cmdArgs, "-pion-net")
 	}
 	cmd := exec.CommandContext(ctx, "ssh", cmdArgs...)
 	cmd.Stderr = os.Stderr
@@ -1198,6 +1215,74 @@ func newLinkUDPMux(profile linkProfile, iface linkInterface, backend udpBackend)
 	}, nil
 }
 
+func newLinkWebRTCNet(profile linkProfile, iface linkInterface, backend udpBackend, usePionNet bool) (*linkWebRTCNet, error) {
+	if !usePionNet {
+		mux, err := newLinkUDPMux(profile, iface, backend)
+		if err != nil {
+			return nil, err
+		}
+		return &linkWebRTCNet{
+			mux:     mux,
+			ip:      mux.ip,
+			network: mux.network,
+			bound:   mux.bound,
+			backend: mux.backend,
+		}, nil
+	}
+	netTransport, ip, networkName, bound, err := newNetworkLinkTransportNet(profile, iface)
+	if err != nil {
+		return nil, err
+	}
+	return &linkWebRTCNet{
+		net:     netTransport,
+		ip:      ip,
+		network: networkName,
+		bound:   bound,
+		backend: backend,
+	}, nil
+}
+
+func newNetworkLinkTransportNet(profile linkProfile, iface linkInterface) (piontransport.Net, net.IP, string, bool, error) {
+	ip, networkName, zone, err := listenIP(iface)
+	if err != nil {
+		return nil, nil, "", false, err
+	}
+	netTransport, err := nwtransport.New(nwtransport.Config{
+		Packet: nwpacket.Config{
+			InterfaceName:         iface.Name,
+			LocalAddr:             &net.UDPAddr{IP: ip, Zone: zone},
+			RequiredInterfaceType: profile.RequiredInterfaceType,
+			SetRequiredInterface:  profile.Name != "thunderbolt",
+			IncludePeerToPeer:     profile.IncludePeerToPeer,
+			RequireInterface:      profile.Name == "awdl",
+			ReuseLocalAddress:     true,
+			QueueLabel:            "com.github.tmc.awdl-webrtc-apple-demo.network-transport",
+			Tracef:                networkTracef,
+		},
+	})
+	if err != nil {
+		return nil, nil, "", false, err
+	}
+	return netTransport, ip, networkName, true, nil
+}
+
+func (l *linkWebRTCNet) Close() {
+	if l == nil || l.mux == nil {
+		return
+	}
+	l.mux.Close()
+}
+
+func (l *linkWebRTCNet) print(prefix string, iface linkInterface, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) {
+	if l.net != nil {
+		fmt.Printf("%s pion net local_ip=%s network=%s backend=%s bound_if=%s mdns=%s raw_candidates=%t\n",
+			prefix, l.ip, l.network, l.backend, boundIfString(iface, l.bound), mdnsModeString(mdnsMode), candidatePolicy.RawHostCandidates)
+		return
+	}
+	fmt.Printf("%s udp mux listen=%s network=%s backend=%s bound_if=%s mdns=%s raw_candidates=%t\n",
+		prefix, l.mux.conn.LocalAddr(), l.network, l.backend, boundIfString(iface, l.bound), mdnsModeString(mdnsMode), candidatePolicy.RawHostCandidates)
+}
+
 func newLinkPacketConn(profile linkProfile, iface linkInterface, backend udpBackend, networkName string) (*linkPacketConn, error) {
 	switch backend {
 	case udpBackendGo:
@@ -1389,7 +1474,7 @@ func udpNetworkForPeer(peer string) (string, error) {
 	return "udp6", nil
 }
 
-func newPeer(iface linkInterface, udpMux *linkUDPMux, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) (*webrtc.PeerConnection, error) {
+func newPeer(iface linkInterface, link *linkWebRTCNet, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) (*webrtc.PeerConnection, error) {
 	var se webrtc.SettingEngine
 	se.SetInterfaceFilter(func(name string) bool {
 		return name == iface.Name
@@ -1411,11 +1496,14 @@ func newPeer(iface linkInterface, udpMux *linkUDPMux, mdnsMode ice.MulticastDNSM
 	})
 	se.SetIncludeLoopbackCandidate(false)
 	se.SetICEMulticastDNSMode(mdnsMode)
-	if udpMux != nil {
-		candidatePolicy.Configure(&se, mdnsMode, udpMux.ip)
+	if link != nil {
+		candidatePolicy.Configure(&se, mdnsMode, link.ip)
 	}
-	if udpMux != nil {
-		se.SetICEUDPMux(udpMux.mux)
+	if link != nil && link.mux != nil {
+		se.SetICEUDPMux(link.mux.mux)
+	}
+	if link != nil && link.net != nil {
+		se.SetNet(link.net)
 	}
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
 	return api.NewPeerConnection(webrtc.Configuration{})
