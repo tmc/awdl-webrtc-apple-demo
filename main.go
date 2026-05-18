@@ -104,6 +104,7 @@ func main() {
 	count := flag.Int("count", 1000, "UDP perf datagram count")
 	size := flag.Int("size", 1200, "UDP perf payload size in bytes")
 	warmup := flag.Int("warmup", 5, "UDP perf warm-up datagrams to omit")
+	trials := flag.Int("trials", 1, "UDP perf trial count")
 	flag.Parse()
 
 	profile, err := profileByName(*profileName)
@@ -206,7 +207,7 @@ func main() {
 			fail(err)
 		}
 	case "udp-perf":
-		if err := udpPerf(ctxWithTimeout(*timeout), profile, iface, backend, *count, *size, *warmup); err != nil {
+		if err := udpPerf(ctxWithTimeout(*timeout), profile, iface, backend, *count, *size, *warmup, *trials); err != nil {
 			fail(err)
 		}
 	case "udp-perf-listen":
@@ -214,7 +215,7 @@ func main() {
 			fail(err)
 		}
 	case "udp-perf-send":
-		if err := udpPerfSend(ctxWithTimeout(*timeout), profile, iface, backend, *peerAddr, *count, *size, *warmup); err != nil {
+		if err := udpPerfSend(ctxWithTimeout(*timeout), profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials); err != nil {
 			fail(err)
 		}
 	default:
@@ -854,11 +855,15 @@ type udpPerfResult struct {
 	Count   int
 	Size    int
 	Warmup  int
+	Lost    int
 	Elapsed time.Duration
 	RTT     []time.Duration
 }
 
-func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup int) error {
+func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup, trials int) error {
+	if trials <= 0 {
+		return errors.New("udp perf -trials must be positive")
+	}
 	serverLink, err := newLinkPacketConn(profile, iface, backend, "")
 	if err != nil {
 		return err
@@ -873,20 +878,25 @@ func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, back
 	client := clientLink.conn
 
 	errc := make(chan error, 1)
-	go echoUDPPackets(ctx, server, count+warmup, errc)
+	go echoUDPPackets(ctx, server, (count+warmup)*trials, errc)
 
 	serverAddr := server.LocalAddr()
 	clientAddr := client.LocalAddr()
 	fmt.Printf("udp perf server=%s client=%s network=%s backend=%s server_bound_if=%s client_bound_if=%s\n",
 		serverAddr, clientAddr, serverLink.network, backend, boundIfString(iface, serverLink.bound), boundIfString(iface, clientLink.bound))
-	result, err := runUDPEchoPerf(ctx, client, serverAddr, count, size, warmup)
-	if err != nil {
-		return err
+	for trial := 1; trial <= trials; trial++ {
+		if trials > 1 {
+			fmt.Printf("udp perf trial=%d/%d\n", trial, trials)
+		}
+		result, err := runUDPEchoPerf(ctx, client, serverAddr, count, size, warmup)
+		if err != nil {
+			return err
+		}
+		printUDPPerf(result)
 	}
 	if err := <-errc; err != nil {
 		return err
 	}
-	printUDPPerf(result)
 	return nil
 }
 
@@ -909,7 +919,7 @@ func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface
 		if err != nil {
 			if ctx.Err() != nil || isTimeout(err) {
 				elapsed := time.Since(start)
-				printUDPPerfListen(packets, bytes, elapsed)
+				printUDPPerfListen(packets, bytes, elapsed, int64(expected))
 				return nil
 			}
 			return fmt.Errorf("udp perf listen read: %w", err)
@@ -921,15 +931,18 @@ func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface
 			return fmt.Errorf("udp perf listen write %s: %w", addr, err)
 		}
 		if expected > 0 && packets >= int64(expected) {
-			printUDPPerfListen(packets, bytes, time.Since(start))
+			printUDPPerfListen(packets, bytes, time.Since(start), int64(expected))
 			return nil
 		}
 	}
 }
 
-func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup int) error {
+func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup, trials int) error {
 	if peer == "" {
 		return errors.New("missing -peer for udp-perf-send")
+	}
+	if trials <= 0 {
+		return errors.New("udp perf -trials must be positive")
 	}
 	networkName, err := udpNetworkForPeer(peer)
 	if err != nil {
@@ -947,11 +960,16 @@ func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, 
 	}
 	fmt.Printf("udp perf local=%s peer=%s network=%s backend=%s bound_if=%s\n",
 		conn.LocalAddr(), addr, networkName, link.backend, boundIfString(iface, link.bound))
-	result, err := runUDPEchoPerf(ctx, conn, addr, count, size, warmup)
-	if err != nil {
-		return err
+	for trial := 1; trial <= trials; trial++ {
+		if trials > 1 {
+			fmt.Printf("udp perf trial=%d/%d\n", trial, trials)
+		}
+		result, err := runUDPEchoPerf(ctx, conn, addr, count, size, warmup)
+		if err != nil {
+			return err
+		}
+		printUDPPerf(result)
 	}
-	printUDPPerf(result)
 	return nil
 }
 
@@ -1003,6 +1021,7 @@ func runUDPEchoPerf(ctx context.Context, conn net.PacketConn, addr net.Addr, cou
 		Count:   count,
 		Size:    size,
 		Warmup:  warmup,
+		Lost:    count - len(rtt),
 		Elapsed: time.Since(start),
 		RTT:     rtt,
 	}, nil
@@ -1042,13 +1061,28 @@ func printUDPPerf(result udpPerfResult) {
 	for _, d := range rtt {
 		total += d
 	}
-	bytes := int64(result.Count * result.Size * 2)
-	fmt.Println("[ ID] Interval           Transfer     Bitrate         Datagrams  Omit  RTT min/avg/p50/p95/max")
-	fmt.Printf("[  5] 0.00-%-7.2f sec  %10s  %13s  %9d  %4d  %s/%s/%s/%s/%s\n",
+	success := len(rtt)
+	bytes := int64(success * result.Size * 2)
+	fmt.Println("[ ID] Interval           Transfer     Bitrate         Datagrams  Lost  Loss    Omit  RTT min/avg/p50/p95/max")
+	if success == 0 {
+		fmt.Printf("[  5] 0.00-%-7.2f sec  %10s  %13s  %9d  %4d  %6s  %4d  -/-/-/-/-\n",
+			result.Elapsed.Seconds(),
+			formatBytes(bytes),
+			formatBitrate(bytes, result.Elapsed),
+			result.Count,
+			result.Lost,
+			formatLoss(result.Lost, result.Count),
+			result.Warmup,
+		)
+		return
+	}
+	fmt.Printf("[  5] 0.00-%-7.2f sec  %10s  %13s  %9d  %4d  %6s  %4d  %s/%s/%s/%s/%s\n",
 		result.Elapsed.Seconds(),
 		formatBytes(bytes),
 		formatBitrate(bytes, result.Elapsed),
 		result.Count,
+		result.Lost,
+		formatLoss(result.Lost, result.Count),
 		result.Warmup,
 		formatDuration(rtt[0]),
 		formatDuration(total/time.Duration(len(rtt))),
@@ -1058,10 +1092,14 @@ func printUDPPerf(result udpPerfResult) {
 	)
 }
 
-func printUDPPerfListen(packets, bytes int64, elapsed time.Duration) {
-	fmt.Println("[ ID] Interval           Transfer     Bitrate         Datagrams")
-	fmt.Printf("[  5] 0.00-%-7.2f sec  %10s  %13s  %9d\n",
-		elapsed.Seconds(), formatBytes(bytes), formatBitrate(bytes, elapsed), packets)
+func printUDPPerfListen(packets, bytes int64, elapsed time.Duration, expected int64) {
+	lost := int64(0)
+	if expected > packets {
+		lost = expected - packets
+	}
+	fmt.Println("[ ID] Interval           Transfer     Bitrate         Datagrams  Lost  Loss")
+	fmt.Printf("[  5] 0.00-%-7.2f sec  %10s  %13s  %9d  %4d  %6s\n",
+		elapsed.Seconds(), formatBytes(bytes), formatBitrate(bytes, elapsed), packets, lost, formatLoss64(lost, expected))
 }
 
 func percentileDuration(values []time.Duration, percentile int) time.Duration {
@@ -1112,6 +1150,17 @@ func formatBitrate(bytes int64, elapsed time.Duration) string {
 		bitsPerSecond /= 1000
 	}
 	return "0 bits/sec"
+}
+
+func formatLoss(lost, count int) string {
+	return formatLoss64(int64(lost), int64(count))
+}
+
+func formatLoss64(lost, count int64) string {
+	if count <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.2f%%", float64(lost)*100/float64(count))
 }
 
 func formatDuration(d time.Duration) string {
