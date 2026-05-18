@@ -8,8 +8,7 @@ See [RESULTS.md](RESULTS.md) for the current answer/output table.
 The reusable Network.framework surfaces are:
 
 - `github.com/tmc/apple/x/network/nwpacket`: a Network.framework
-  `net.PacketConn`, consumed from the sibling `tmc/apple` checkout through the
-  temporary `replace github.com/tmc/apple => ../apple`.
+  `net.PacketConn`, consumed from released `github.com/tmc/apple v0.6.4`.
 - `github.com/tmc/apple-pion/nwtransport`: a small Pion `transport.Net`
   adapter, consumed from the sibling `tmc/apple-pion` checkout through the
   temporary `replace github.com/tmc/apple-pion => ../apple-pion`. It routes
@@ -138,8 +137,8 @@ scripts/release-preflight.sh
 ```
 
 It verifies the local gates and package availability, then fails until the demo
-and `apple-pion` have remotes, the needed `tmc/apple` commit is published, and
-the local `replace` directives can be removed.
+and `apple-pion` have remotes and the remaining local `apple-pion` replace can
+be removed.
 
 The `udp` mode opens two ordinary Go UDP sockets on the selected interface,
 sets Darwin `IP_BOUND_IF` or `IPV6_BOUND_IF` for AWDL or scoped IPv6 sockets,
