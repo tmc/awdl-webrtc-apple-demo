@@ -504,9 +504,9 @@ func udpSend(ctx context.Context, iface linkInterface, peer, message string) err
 	if peer == "" {
 		return errors.New("missing -peer for udp-send")
 	}
-	networkName := "udp4"
-	if strings.Contains(peer, ":") {
-		networkName = "udp6"
+	networkName, err := udpNetworkForPeer(peer)
+	if err != nil {
+		return err
 	}
 	bindIf := shouldBindUDPToInterface(iface, networkName)
 	conn, _, bound, err := listenUDPOnInterfaceNetwork(iface, networkName, bindIf)
@@ -612,9 +612,9 @@ func udpPerfSend(ctx context.Context, iface linkInterface, peer string, count, s
 	if peer == "" {
 		return errors.New("missing -peer for udp-perf-send")
 	}
-	networkName := "udp4"
-	if strings.Contains(peer, ":") {
-		networkName = "udp6"
+	networkName, err := udpNetworkForPeer(peer)
+	if err != nil {
+		return err
 	}
 	bindIf := shouldBindUDPToInterface(iface, networkName)
 	conn, _, bound, err := listenUDPOnInterfaceNetwork(iface, networkName, bindIf)
@@ -933,6 +933,24 @@ func listenIPForNetwork(iface linkInterface, networkName string) (net.IP, string
 		return nil, "", fmt.Errorf("unsupported udp network %q", networkName)
 	}
 	return nil, "", fmt.Errorf("%s has no usable %s address", iface.Name, networkName)
+}
+
+func udpNetworkForPeer(peer string) (string, error) {
+	host, _, err := net.SplitHostPort(peer)
+	if err != nil {
+		return "", fmt.Errorf("split peer %q: %w", peer, err)
+	}
+	if i := strings.LastIndex(host, "%"); i >= 0 {
+		host = host[:i]
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "", fmt.Errorf("peer %q has non-IP host %q", peer, host)
+	}
+	if ip.To4() != nil {
+		return "udp4", nil
+	}
+	return "udp6", nil
 }
 
 func newPeer(iface linkInterface, udpMux *linkUDPMux) (*webrtc.PeerConnection, error) {
