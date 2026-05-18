@@ -16,7 +16,7 @@ not released API.
 | Fail closed on the actual Network.framework path | Grove `cmd/grove-perftest/perftest.go` exposes `-nw-require-interface` and `-nw-forbid-loopback`; `transport/nw/path.go` reports `NWPath` status, interface names, types, and indexes. WeightShare `awdl_data_darwin.go` reports `AWDLPathInfo` and lets `awdl-speed -require-interface awdl0` fail if the transfer did not use AWDL. | Export path reporting from `github.com/tmc/apple/x/network/nwpacket`, then add demo flags such as `-require-path-interface awdl0` and `-forbid-loopback`. Make `scripts/remote-matrix.sh` require `awdl0` for AWDL, `en0` for LAN, and the selected Thunderbolt interface for Thunderbolt. |
 | Add a Bonjour-discovered control path | Grove's Network.framework transport can advertise one service and dial a peer service by name; WeightShare uses `NWEndpointCreateBonjourService` for AWDL data transfers. | Add an optional Network.framework/Bonjour signaling mode for offer/answer exchange. SSH would stay useful for orchestration, but the WebRTC proof would no longer depend on SSH as the only control plane. |
 | Add callback-style reverse probes | WeightShare `MeasureAWDLSpeed` starts a temporary callback listener, sends the callback service name to the peer, and has the peer connect back to deliver data. | Add a `udp-reverse-probe` or Network.framework TCP probe that makes the remote side connect back to a local advertised callback service. This should isolate listener/firewall/path issues behind the LAN/Thunderbolt/AWDL UDP asymmetry. |
-| Broaden performance modes | Grove perftest has message size, warmup, iterations, duration mode, multi-stream/full-duplex mode, ping-pong latency, CPU/mem profiles, and JSON including path data. WeightShare transfers large chunks and prints path names with throughput. | Keep the current iperf-like UDP output, then add `-duration`, `-streams`, and an explicit latency-only ping-pong mode. Include Network.framework path info in JSON once `nwpacket` exposes it. |
+| Broaden performance modes | Grove perftest has message size, warmup, iterations, duration mode, multi-stream/full-duplex mode, ping-pong latency, CPU/mem profiles, and JSON including path data. WeightShare transfers large chunks and prints path names with throughput. | Keep the current iperf-like UDP output, use the added `-duration` mode for longer samples, then add `-streams` and an explicit latency-only ping-pong mode. Include Network.framework path info in JSON once `nwpacket` exposes it. |
 | Handle transient Network.framework waiting states | Grove's `dialEndpoint` retries until a deadline and treats `NWConnectionStateWaiting` with a grace timer instead of immediately failing. | Consider adding a short waiting-state grace/retry loop to `nwpacket` outbound UDP connections. This is a plausible improvement for Thunderbolt/AWDL local-to-remote readiness timeouts. |
 
 ## Discovery Ideas
@@ -82,8 +82,8 @@ when the observed path is inconsistent with the requested profile.
 ## Suggested Order
 
 1. Export path reporting from `nwpacket` and require it in the remote matrix.
-2. Add `-duration` and `-streams` to UDP perf so longer trials are less tied to
-   a fixed datagram count.
+2. Add `-streams` to UDP perf so longer trials can exercise multiple flows
+   after the fixed-duration path is validated remotely.
 3. Add callback-style reverse probe to isolate the listener asymmetry.
 4. Add Bonjour discovery/signaling as a second control plane after SSH-based
    validation is green again.

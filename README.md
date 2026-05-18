@@ -140,8 +140,10 @@ SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh
 The script builds a temporary local binary, copies it to `REMOTE_BIN` on the
 peer, then runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus
 Network.framework UDP perf in both directions. Override `PROFILES`, `COUNT`,
-`WARMUP`, `TRIALS`, `WINDOW`, `TIMEOUT`, `LOCAL_BIN`, or `REMOTE_BIN` to narrow
-or lengthen a run.
+`DURATION`, `WARMUP`, `TRIALS`, `WINDOW`, `TIMEOUT`, `LOCAL_BIN`, or
+`REMOTE_BIN` to narrow or lengthen a run. When `DURATION` is set, sender trials
+run for that duration instead of a fixed datagram count and listeners run until
+their timeout.
 
 Before cutting releases or removing local module replaces, run:
 
@@ -163,11 +165,13 @@ The `udp-perf` mode runs a small iperf-like request/echo benchmark over the
 same sockets and prints transfer, bitrate, datagram count, loss, and RTT
 summary columns. The `-warmup` packets are omitted from the summary, and
 `-trials` repeats the same run on one connection and prints an aggregate
-summary when more than one trial runs. `-window` sets the maximum number of
-in-flight echo requests for bounded pipelining; the default `1` preserves the
-serial request/echo behavior. Use `-perf-json` to also print JSON result
-records per trial plus an aggregate summary or listener summary. Echo timeouts
-are counted as lost datagrams after `-packet-timeout`, while write and
+summary when more than one trial runs. `-duration` makes each trial run for a
+fixed time instead of a fixed `-count`; the JSON record includes both the
+requested `duration_ns` and the actual elapsed time. `-window` sets the maximum
+number of in-flight echo requests for bounded pipelining; the default `1`
+preserves the serial request/echo behavior. Use `-perf-json` to also print JSON
+result records per trial plus an aggregate summary or listener summary. Echo
+timeouts are counted as lost datagrams after `-packet-timeout`, while write and
 corrupt-reply errors still fail the run. This is a smoke benchmark, not a
 replacement for `iperf3`.
 
@@ -182,7 +186,7 @@ Then send to the printed scoped address from another Mac:
 
 ```sh
 go run . -profile awdl -backend go -mode udp-send -peer '[fe80::peer%awdl0]:12345' -timeout 10s
-go run . -profile awdl -backend go -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -count 1000 -size 1200 -warmup 5 -trials 3 -window 4 -perf-json -timeout 20s
+go run . -profile awdl -backend go -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -duration 10s -size 1200 -warmup 5 -trials 3 -window 4 -perf-json -timeout 40s
 ```
 
 For Network.framework diagnostics, set:
