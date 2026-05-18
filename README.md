@@ -8,7 +8,8 @@ See [RESULTS.md](RESULTS.md) for the current answer/output table.
 The reusable Network.framework surfaces are:
 
 - `github.com/tmc/awdl-webrtc-apple-demo/nwpacket`: a Network.framework
-  `net.PacketConn`.
+  `net.PacketConn`. This has also been promoted to
+  `github.com/tmc/apple/network/nwpacket` in the sibling `tmc/apple` checkout.
 - `github.com/tmc/awdl-webrtc-apple-demo/nwtransport`: a small Pion
   `transport.Net` adapter that routes UDP listeners and concrete UDP dials
   through `nwpacket`.
