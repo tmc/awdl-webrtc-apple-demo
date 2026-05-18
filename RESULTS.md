@@ -15,7 +15,7 @@ Scope terms:
 | Question / Area | Status | Answer | Evidence | Caveat / Next |
 | --- | --- | --- | --- | --- |
 | Repo location | PASS | The demo is in `~/go/src/github.com/tmc/awdl-webrtc-apple-demo`. | Productization includes reusable packet and Pion transport packages plus docs/audit tables. | Uses local replaces for sibling `tmc/apple` and `tmc/apple-pion` until releases carry these packages. |
-| Build | PASS | The module builds. | `go test ./...` -> `[no test files]`. | Darwin-only demo. |
+| Build | PASS | The module builds and the focused tests pass. | `go test ./...`; `go vet ./...`; `git diff --check`. | Darwin-only demo. |
 | WebRTC support | PASS | Yes, via Pion WebRTC with constrained ICE. | Modes: `check`, `gather`, `pair`, `answer-stdio`, `offer-ssh`. | `offer-ssh` is explicit demo signaling, not a general signaling service. |
 | Pion changes | PASS | No Pion fork or patch was needed. | Uses `SettingEngine` filters, mDNS mode, `SetICEUDPMux`, `SetNet`, explicit SDP exchange, and `internal/icepolicy`. | AWDL raw-candidate publication is still demo-side SDP mutation. |
 | Pluggable backend shape | PASS | The CLI has `-backend go\|network`; WebRTC can use either an ICE UDP mux or `-pion-net`. | `go test ./...`; `-backend network` gather, UDP perf, remote WebRTC, and `-pion-net` LAN/Thunderbolt/AWDL remote WebRTC pass. | TCP, TURN/STUN, and package placement are still product decisions. |
@@ -34,7 +34,7 @@ Scope terms:
 | AWDL UDP | PASS | Direct UDP over AWDL works with interface-bound sockets. | Echo over `[fe80::...%awdl0]` with `server_bound_if=awdl0(16) client_bound_if=awdl0(16)`. | Cold AWDL can time out; `gather` activates the path. |
 | AWDL remote UDP perf | PASS | Remote-to-local AWDL UDP completed. | Latest Network.framework sample: 10 datagrams, `2.61 Mbits/sec`, avg RTT `7.360ms`. | Local-to-remote Network.framework listener direction timed out before the first write became ready. |
 | AWDL Network.framework UDP | PARTIAL | Network.framework can send raw UDP perf traffic over AWDL in the remote-to-local direction. | Remote-to-local: 10 datagrams, zero loss, `2.61 Mbits/sec`; local-to-remote: 0/10 datagrams, readiness timeout. | Smoke-level runs only; direction asymmetry remains. |
-| Thunderbolt discovery | PASS | Thunderbolt Bridge ICE gathering works. | `gathered 2 host candidate(s) from bridge0-bound UDP mux`. | Default is `bridge0`; override with `-iface`. |
+| Thunderbolt discovery | PASS | Thunderbolt ICE gathering works through the first usable Thunderbolt interface. | Historical bridge sample: `gathered 2 host candidate(s) from bridge0-bound UDP mux`; current no-bridge-address sample falls back to `en1` and gathers 2 Network.framework candidates. | Override with `-iface` when you need an exact member or bridge interface. |
 | Thunderbolt WebRTC datachannel | PASS | Local and remote Thunderbolt-constrained datachannels work. | Local `pair`; remote `offer-ssh` with `tmc2@10.0.18.249` over `bridge0`. | Remote proof uses explicit SSH signaling. |
 | Thunderbolt remote UDP perf | PASS | Remote-to-local Thunderbolt UDP completed. | Latest Network.framework sample: 20 datagrams, `11.25 Mbits/sec`, avg RTT `1.706ms`. | Local-to-remote UDP listener saw zero datagrams in both Go and Network.framework backend checks. |
 | Thunderbolt Network.framework UDP | PARTIAL | Network.framework can send raw UDP perf traffic over Thunderbolt Bridge in the remote-to-local direction. | Remote-to-local: 20 datagrams, zero loss, `11.25 Mbits/sec`; local-to-remote: 0/20 datagrams, readiness timeout. | Required interface type is omitted; the link-local bridge address selects `bridge0`. |
@@ -45,23 +45,32 @@ Scope terms:
 | Thunderbolt local perf | PASS | Local Thunderbolt sample produced `283.48 Mbits/sec`. | 1000 datagrams, 1200-byte payload, 5 warmup packets omitted. | Same-host sample, not peer-to-peer cable speed. |
 | Two-host UDP proof | READY | Listener/sender modes are implemented. | `udp-listen`, `udp-send`, `udp-perf-listen`, `udp-perf-send`. | Use printed scoped peer address on the sender. |
 
+## Current Live State
+
+| Check | Result |
+| --- | --- |
+| Local Thunderbolt default | With `bridge0` addressless, `go run . -profile thunderbolt -backend network -mode check -timeout 3s` selected `en1` at `172.31.253.1`. |
+| Local Thunderbolt gather | `go run . -profile thunderbolt -backend network -mode gather -timeout 5s` gathered 2 mDNS candidates from an `en1` Network.framework UDP mux. |
+| Remote SSH | `ssh -o ConnectTimeout=5 -o BatchMode=yes tmc2@10.0.18.249 ...` timed out, so fresh two-host Thunderbolt/AWDL/LAN reruns are gated on remote reachability. |
+
 ## Host Matrix
 
 | Host | Access | LAN `en0` | Thunderbolt `bridge0` | AWDL `awdl0` |
 | --- | --- | --- | --- | --- |
-| Local | shell | `10.0.199.147` | `169.254.61.91` | `fe80::cd4:b4ff:fe63:bc03%awdl0` |
+| Local | shell | `10.0.199.147` | historical `bridge0` `169.254.61.91`; current fallback `en1` `172.31.253.1` | `fe80::cd4:b4ff:fe63:bc03%awdl0` |
 | Remote | `ssh tmc2@10.0.18.249` | `10.0.18.249` | `169.254.88.35` | `fe80::9477:6dff:fe11:6a55%awdl0` |
 
 ## Command Matrix
 
 | Goal | Command | Observed Result |
 | --- | --- | --- |
-| Build gate | `go test ./...` | `? github.com/tmc/awdl-webrtc-apple-demo [no test files]` |
+| Build gate | `go test ./...`; `go vet ./...`; `git diff --check` | Tests pass for the main package and `internal/icepolicy`; vet and whitespace checks pass. |
 | Productized packages | `go test ./internal/icepolicy`; in `tmc/apple`: `go test ./network/nwpacket`; in `tmc/apple-pion`: `go test ./...` | `internal/icepolicy`, promoted `nwpacket`, and promoted `nwtransport` tests pass. |
 | Network backend build pin | `go list -m -f '{{.Path}} {{.Version}} {{.Replace.Path}}' github.com/tmc/apple github.com/tmc/apple-pion` | `github.com/tmc/apple v0.6.3 ../apple`; `github.com/tmc/apple-pion v0.0.0 ../apple-pion`. |
 | Network LAN gather | `go run . -profile lan -backend network -mode gather -timeout 8s` | Two mDNS host candidates from an `en0` Network.framework UDP mux. |
 | Pion-native LAN gather | `AWDL_DEMO_NETWORK_TRACE=1 go run . -profile lan -backend network -pion-net -mode gather -timeout 12s` | Ten mDNS host candidates; trace showed Network.framework listeners for each selected `en0` address. |
 | Pion-native LAN pair | `go run . -profile lan -backend network -pion-net -mode pair -timeout 15s` | Same-host datachannel opened and exchanged payload over `en0` through Pion `transport.Net`. |
+| Current Thunderbolt fallback | `go run . -profile thunderbolt -backend network -mode gather -timeout 5s` | With `bridge0` addressless, default selection fell back to `en1` and gathered two mDNS host candidates. |
 | Network Thunderbolt gather | `go run . -profile thunderbolt -backend network -mode gather -timeout 8s` | Two mDNS host candidates from a `bridge0` Network.framework UDP mux. |
 | Network AWDL gather | `go run . -profile awdl -backend network -mode gather -timeout 12s` | Two mDNS host candidates from an `awdl0` Network.framework UDP mux. |
 | Pion-native AWDL gather | `AWDL_DEMO_NETWORK_TRACE=1 go run . -profile awdl -backend network -pion-net -mode gather -timeout 15s` | Two mDNS host candidates from `awdl0`; trace showed a Network.framework listener on `[fe80::...%awdl0]`. |
@@ -88,8 +97,8 @@ Scope terms:
 | AWDL WebRTC gather | `go run . -profile awdl -mode gather -timeout 10s` | Two mDNS host candidates from an `awdl0` UDP mux. |
 | AWDL UDP echo | `go run . -profile awdl -mode udp -timeout 10s` | Echoed `ping` over scoped IPv6 on `awdl0`. |
 | AWDL local perf | `go run . -profile awdl -mode udp-perf -count 1000 -size 1200 -warmup 5 -timeout 30s` | `2.29 MBytes`, `221.70 Mbits/sec`, average RTT `86.499us`. |
-| Thunderbolt policy check | `go run . -profile thunderbolt -mode check` | Prints wired policy and private `required_interface=bridge0`. |
-| Thunderbolt WebRTC gather | `go run . -profile thunderbolt -mode gather -timeout 10s` | Two mDNS host candidates from a `bridge0` UDP mux. |
+| Thunderbolt policy check | `go run . -profile thunderbolt -mode check` | Prints wired policy and the selected Thunderbolt interface. Current default is `en1` while `bridge0` has no address. |
+| Thunderbolt WebRTC gather | `go run . -profile thunderbolt -mode gather -timeout 10s` | Two mDNS host candidates from the selected Thunderbolt interface. Historical bridge evidence used `bridge0`; current fallback evidence uses `en1`. |
 | Thunderbolt WebRTC pair | `go run . -profile thunderbolt -mode pair -timeout 12s` | Datachannel opened and exchanged payload over `bridge0`-constrained ICE. |
 | Thunderbolt local perf | `go run . -profile thunderbolt -mode udp-perf -count 1000 -size 1200 -warmup 5 -timeout 30s` | `2.29 MBytes`, `283.48 Mbits/sec`, average RTT `67.606us`. |
 | LAN remote perf listener | Local: `/tmp/awdl-webrtc-apple-demo-bin -profile lan -mode udp-perf-listen -count 20 -warmup 2 -timeout 15s` | Listener received 22 datagrams including warmup. |

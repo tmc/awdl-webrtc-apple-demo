@@ -20,9 +20,11 @@ It has three profiles:
   peer-to-peer Wi-Fi, and uses private `NWParameters` knobs for `useAWDL`,
   `useP2P`, exact required interface, socket access, local address reuse, and
   fallback prohibition.
-- `thunderbolt`: uses the Thunderbolt Bridge, normally `bridge0`. The Go
-  backend binds ordinary UDP sockets to the bridge address; the Network.framework
-  backend lets the link-local peer address select `bridge0`.
+- `thunderbolt`: uses the Thunderbolt Bridge, normally `bridge0`. If `bridge0`
+  exists but has no usable address, the default selector falls back to the first
+  usable Thunderbolt member interface among `en1`, `en2`, and `en3`. The Go
+  backend binds ordinary UDP sockets to the selected interface address; the
+  Network.framework backend lets the peer address select the path.
 - `lan`: uses `en0`. The Go backend binds ordinary UDP sockets to the LAN
   address; the Network.framework backend uses Wi-Fi UDP policy and the LAN peer
   address selects `en0`.
