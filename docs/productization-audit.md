@@ -19,6 +19,7 @@ evidence.
 go test ./...
 go vet ./...
 bash -n scripts/remote-matrix.sh
+bash -n scripts/remote-matrix-bundle.sh
 bash -n scripts/remote-diagnostics.sh
 bash -n scripts/release-preflight.sh
 scripts/release-preflight.sh
@@ -35,7 +36,11 @@ go run . -profile lan -iface lo0 -backend go -mode udp-latency -count 3 -warmup 
 # callback smoke: run udp-callback-listen on lo0, then udp-callback-request to the printed address
 go run . -profile thunderbolt -backend go -mode udp-perf -duration 20ms -warmup 0 -window 1 -packet-timeout 20ms -perf-json -timeout 5s
 go run . -profile lan -backend go -mode udp-perf-send -peer 10.0.199.147:9 -count 2 -warmup 0 -packet-timeout 100ms -perf-json -timeout 5s
-CANDIDATE_POLICY=auto SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh
+CANDIDATE_POLICY=auto \
+SSH_TARGET=tmc2@10.0.18.249 \
+OUTPUT=/tmp/awdl-webrtc-matrix.txt \
+SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-summary.md \
+scripts/remote-matrix-bundle.sh
 go run . -profile lan -backend network -pion-net -mdns disabled -candidate-policy auto -mode offer-ssh -ssh tmc2@10.0.18.249 -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 35s
 go run . -profile thunderbolt -backend network -pion-net -mdns disabled -candidate-policy auto -mode offer-ssh -ssh tmc2@10.0.18.249 -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 40s
 go run . -profile awdl -backend network -pion-net -mdns disabled -candidate-policy auto -mode offer-ssh -ssh tmc2@10.0.18.249 -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 45s
