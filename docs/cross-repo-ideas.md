@@ -13,10 +13,10 @@ not released API.
 
 | Idea | Source pattern | Change for this demo |
 | --- | --- | --- |
-| Fail closed on the actual Network.framework path | Grove `cmd/grove-perftest/perftest.go` exposes `-nw-require-interface` and `-nw-forbid-loopback`; `transport/nw/path.go` reports `NWPath` status, interface names, types, and indexes. WeightShare `awdl_data_darwin.go` reports `AWDLPathInfo` and lets `awdl-speed -require-interface awdl0` fail if the transfer did not use AWDL. | Export path reporting from `github.com/tmc/apple/x/network/nwpacket`, then add demo flags such as `-require-path-interface awdl0` and `-forbid-loopback`. Make `scripts/remote-matrix.sh` require `awdl0` for AWDL, `en0` for LAN, and the selected Thunderbolt interface for Thunderbolt. |
+| Fail closed on the actual Network.framework path | Grove `cmd/grove-perftest/perftest.go` exposes `-nw-require-interface` and `-nw-forbid-loopback`; `transport/nw/path.go` reports `NWPath` status, interface names, types, and indexes. WeightShare `awdl_data_darwin.go` reports `AWDLPathInfo` and lets `awdl-speed -require-interface awdl0` fail if the transfer did not use AWDL. | `github.com/tmc/apple/x/network/nwpacket` now exposes `PathReporter`, and the demo has `-require-path-interface`, `-forbid-loopback-path`, and opt-in `REQUIRE_PATHS=1` remote-matrix enforcement. |
 | Add a Bonjour-discovered control path | Grove's Network.framework transport can advertise one service and dial a peer service by name; WeightShare uses `NWEndpointCreateBonjourService` for AWDL data transfers. | Add an optional Network.framework/Bonjour signaling mode for offer/answer exchange. SSH would stay useful for orchestration, but the WebRTC proof would no longer depend on SSH as the only control plane. |
 | Add callback-style reverse probes | WeightShare `MeasureAWDLSpeed` starts a temporary callback listener, sends the callback service name to the peer, and has the peer connect back to deliver data. | Use the added `udp-callback-listen` and `udp-callback-request` modes to make the peer send one datagram back to a temporary callback address. This should isolate listener/firewall/path issues behind the LAN/Thunderbolt/AWDL UDP asymmetry once the second Mac is reachable. |
-| Broaden performance modes | Grove perftest has message size, warmup, iterations, duration mode, multi-stream/full-duplex mode, ping-pong latency, CPU/mem profiles, and JSON including path data. WeightShare transfers large chunks and prints path names with throughput. | Keep the current iperf-like UDP output, use the added `-duration`, `-streams`, and `udp-latency` modes for longer samples, then include Network.framework path info in JSON once `nwpacket` exposes it. |
+| Broaden performance modes | Grove perftest has message size, warmup, iterations, duration mode, multi-stream/full-duplex mode, ping-pong latency, CPU/mem profiles, and JSON including path data. WeightShare transfers large chunks and prints path names with throughput. | Keep the current iperf-like UDP output, use the added `-duration`, `-streams`, `udp-latency`, and path JSON modes for longer samples. |
 | Handle transient Network.framework waiting states | Grove's `dialEndpoint` retries until a deadline and treats `NWConnectionStateWaiting` with a grace timer instead of immediately failing. | Consider adding a short waiting-state grace/retry loop to `nwpacket` outbound UDP connections. This is a plausible improvement for Thunderbolt/AWDL local-to-remote readiness timeouts. |
 
 ## Discovery Ideas
@@ -49,25 +49,24 @@ uses_wired: false
 interfaces: [{name: awdl0, type: NWInterfaceTypeWifi, index: ...}]
 ```
 
-This demo already prints requested profile/interface and can trace paths with
-`AWDL_DEMO_NETWORK_TRACE=1`, but the path is not a structured result. The next
-clean API is an exported `nwpacket.PathInfo` plus helper methods:
+This demo now prints requested profile/interface and can trace paths with
+`AWDL_DEMO_NETWORK_TRACE=1`. `nwpacket.PathReporter` exposes the current
+`NWPath` for established peers:
 
 ```go
-type PathInfo struct {
-	Status       string
-	UsesWifi     bool
-	UsesLoopback bool
-	UsesWired    bool
-	Interfaces   []PathInterface
+type Path struct {
+	Status     network.NWPathStatus
+	Interfaces []PathInterface
 }
 
-func (p PathInfo) UsesInterface(name string) bool
-func (p PathInfo) InterfaceNames() []string
+func (p Path) UsesInterface(name string) bool
+func (p Path) InterfaceNames() []string
 ```
 
-The demo can then include `path` in `udp_perf` JSON records and fail the matrix
-when the observed path is inconsistent with the requested profile.
+The demo includes `paths` in `udp_perf` and `udp_latency` JSON records when a
+Network.framework peer path is available, and `-require-path-interface` /
+`-forbid-loopback-path` fail a sender run when the observed path is
+inconsistent with the requested profile.
 
 ## What Not To Copy Directly
 
@@ -81,7 +80,7 @@ when the observed path is inconsistent with the requested profile.
 
 ## Suggested Order
 
-1. Export path reporting from `nwpacket` and require it in the remote matrix.
+1. Run `REQUIRE_PATHS=1` remote matrix once the second Mac is reachable.
 2. Validate fixed-duration, multi-stream, and latency-only runs remotely.
 3. Validate callback-style reverse probes on the second Mac to isolate the
    listener asymmetry.

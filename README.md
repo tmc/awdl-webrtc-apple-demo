@@ -8,7 +8,7 @@ See [RESULTS.md](RESULTS.md) for the current answer/output table.
 The reusable Network.framework surfaces are:
 
 - `github.com/tmc/apple/x/network/nwpacket`: a Network.framework
-  `net.PacketConn`, consumed from released `github.com/tmc/apple v0.6.5`.
+  `net.PacketConn`, consumed from released `github.com/tmc/apple v0.6.6`.
 - `github.com/tmc/apple-pion/nwtransport`: a small Pion `transport.Net`
   adapter, consumed from the sibling `tmc/apple-pion` checkout through the
   temporary `replace github.com/tmc/apple-pion => ../apple-pion`. It routes
@@ -72,7 +72,7 @@ The UI advertises a Bonjour service, starts local UDP echo listeners for
 Thunderbolt, AWDL, and LAN when those paths are available, and samples the peer
 in that order. A Thunderbolt path with no replies is marked unavailable for
 that sample and the monitor immediately tries AWDL, then LAN. The monitor is
-intended to keep using the published `github.com/tmc/apple v0.6.5` bindings;
+intended to keep using the published `github.com/tmc/apple v0.6.6` bindings;
 `GOWORK=off` avoids accidentally resolving a sibling checkout.
 
 The `-backend` flag selects `go` or `network`.
@@ -146,7 +146,10 @@ Network.framework UDP perf, latency, and callback probes in both directions.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, or `REMOTE_BIN` to narrow or lengthen a run.
 When `DURATION` is set, sender trials run for that duration instead of a fixed
-datagram count and listeners run until their timeout.
+datagram count and listeners run until their timeout. Set `REQUIRE_PATHS=1` to
+add `-require-path-interface` and `-forbid-loopback-path` to sender runs; LAN
+defaults to `en0`, AWDL defaults to `awdl0`, and Thunderbolt uses
+`THUNDERBOLT_PATH_INTERFACE` when set.
 
 Before cutting releases or removing local module replaces, run:
 
@@ -177,10 +180,13 @@ PacketConns and aggregates the concurrent stream results into one trial record.
 `udp-latency` and `udp-latency-send` use the same echo path but print only
 datagram, loss, and RTT columns; `udp-latency-send` talks to a normal
 `udp-perf-listen` listener. Use `-perf-json` to also print JSON result records
-per trial plus an aggregate summary or listener summary. Echo timeouts are
-counted as lost datagrams after `-packet-timeout`, while write and corrupt-reply
-errors still fail the run. This is a smoke benchmark, not a replacement for
-`iperf3`.
+per trial plus an aggregate summary or listener summary. Network.framework
+connections include observed path records in JSON when available. Use
+`-require-path-interface awdl0` or `-forbid-loopback-path` to fail a perf or
+latency run when the observed path is inconsistent with the requested link.
+Echo timeouts are counted as lost datagrams after `-packet-timeout`, while
+write and corrupt-reply errors still fail the run. This is a smoke benchmark,
+not a replacement for `iperf3`.
 
 For a two-host AWDL UDP proof, run the listener on one Mac:
 
