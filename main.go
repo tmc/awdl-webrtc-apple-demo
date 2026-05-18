@@ -16,9 +16,9 @@ import (
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
-	"github.com/tmc/apple/foundation"
 	applenetwork "github.com/tmc/apple/network"
-	privatenetwork "github.com/tmc/apple/private/network"
+	"github.com/tmc/apple/objc"
+	"github.com/tmc/apple/objectivec"
 	"golang.org/x/sys/unix"
 )
 
@@ -59,16 +59,33 @@ type privatePolicy struct {
 }
 
 type linkUDPMux struct {
-	conn    *net.UDPConn
+	conn    net.PacketConn
 	mux     *ice.UDPMuxDefault
 	ip      net.IP
 	network string
 	bound   bool
+	backend udpBackend
 }
+
+type linkPacketConn struct {
+	conn    net.PacketConn
+	ip      net.IP
+	network string
+	bound   bool
+	backend udpBackend
+}
+
+type udpBackend string
+
+const (
+	udpBackendGo      udpBackend = "go"
+	udpBackendNetwork udpBackend = "network"
+)
 
 func main() {
 	profileName := flag.String("profile", "awdl", "link profile: awdl, thunderbolt, or lan")
 	ifaceName := flag.String("iface", "", "network interface to constrain ICE candidates to; default depends on profile")
+	backendName := flag.String("backend", string(udpBackendGo), "UDP backend: go or network")
 	mode := flag.String("mode", "check", "mode: check, gather, pair, udp, udp-listen, udp-send, udp-perf, udp-perf-listen, or udp-perf-send")
 	timeout := flag.Duration("timeout", 8*time.Second, "timeout for WebRTC and UDP modes")
 	peerAddr := flag.String("peer", "", "remote UDP address for udp-send, such as [fe80::1%awdl0]:12345")
@@ -79,6 +96,10 @@ func main() {
 	flag.Parse()
 
 	profile, err := profileByName(*profileName)
+	if err != nil {
+		fail(err)
+	}
+	backend, err := parseUDPBackend(*backendName)
 	if err != nil {
 		fail(err)
 	}
@@ -139,37 +160,37 @@ func main() {
 
 	switch *mode {
 	case "check":
-		fmt.Printf("pion webrtc interface_filter=%s network_types=udp4,udp6 mdns=query-and-gather\n", iface.Name)
+		fmt.Printf("pion webrtc interface_filter=%s network_types=udp4,udp6 mdns=query-and-gather udp_backend=%s\n", iface.Name, backend)
 	case "gather":
-		if err := gather(ctxWithTimeout(*timeout), iface); err != nil {
+		if err := gather(ctxWithTimeout(*timeout), profile, iface, backend); err != nil {
 			fail(err)
 		}
 	case "pair":
-		if err := pair(ctxWithTimeout(*timeout), iface); err != nil {
+		if err := pair(ctxWithTimeout(*timeout), profile, iface, backend); err != nil {
 			fail(err)
 		}
 	case "udp":
-		if err := udpEcho(ctxWithTimeout(*timeout), iface, *message); err != nil {
+		if err := udpEcho(ctxWithTimeout(*timeout), profile, iface, backend, *message); err != nil {
 			fail(err)
 		}
 	case "udp-listen":
-		if err := udpListen(ctxWithTimeout(*timeout), iface); err != nil {
+		if err := udpListen(ctxWithTimeout(*timeout), profile, iface, backend); err != nil {
 			fail(err)
 		}
 	case "udp-send":
-		if err := udpSend(ctxWithTimeout(*timeout), iface, *peerAddr, *message); err != nil {
+		if err := udpSend(ctxWithTimeout(*timeout), profile, iface, backend, *peerAddr, *message); err != nil {
 			fail(err)
 		}
 	case "udp-perf":
-		if err := udpPerf(ctxWithTimeout(*timeout), iface, *count, *size, *warmup); err != nil {
+		if err := udpPerf(ctxWithTimeout(*timeout), profile, iface, backend, *count, *size, *warmup); err != nil {
 			fail(err)
 		}
 	case "udp-perf-listen":
-		if err := udpPerfListen(ctxWithTimeout(*timeout), iface, *count+*warmup); err != nil {
+		if err := udpPerfListen(ctxWithTimeout(*timeout), profile, iface, backend, *count+*warmup); err != nil {
 			fail(err)
 		}
 	case "udp-perf-send":
-		if err := udpPerfSend(ctxWithTimeout(*timeout), iface, *peerAddr, *count, *size, *warmup); err != nil {
+		if err := udpPerfSend(ctxWithTimeout(*timeout), profile, iface, backend, *peerAddr, *count, *size, *warmup); err != nil {
 			fail(err)
 		}
 	default:
@@ -201,6 +222,17 @@ func profileByName(name string) (linkProfile, error) {
 		}, nil
 	default:
 		return linkProfile{}, fmt.Errorf("unknown -profile %q", name)
+	}
+}
+
+func parseUDPBackend(name string) (udpBackend, error) {
+	switch udpBackend(strings.ToLower(name)) {
+	case udpBackendGo:
+		return udpBackendGo, nil
+	case udpBackendNetwork:
+		return udpBackendNetwork, nil
+	default:
+		return "", fmt.Errorf("unknown -backend %q", name)
 	}
 }
 
@@ -243,41 +275,82 @@ func configurePrivatePolicy(profile linkProfile, iface linkInterface) (policy pr
 			err = fmt.Errorf("configure private Network.framework policy: %v", r)
 		}
 	}()
-	params := privatenetwork.NewNWParameters()
-	if params.GetID() == 0 {
+	params := newPrivateNWParameters()
+	if params.ID == 0 {
 		return privatePolicy{}, errors.New("private NWParameters returned nil")
 	}
-	privateIface := privatenetwork.NewNWInterfaceWithInterfaceName(foundation.NewStringWithString(iface.Name))
-	if privateIface.GetID() == 0 {
+	privateIface := newPrivateNWInterfaceWithName(iface.Name)
+	if privateIface.ID == 0 {
 		return privatePolicy{}, fmt.Errorf("private NWInterface(%s) returned nil", iface.Name)
 	}
-	params.SetRequiredInterface(privateIface)
-	params.SetRequiredInterfaceType(int64(profile.RequiredInterfaceType))
-	params.SetUseAWDL(profile.UseAWDL)
-	params.SetUseP2P(profile.UseP2P)
-	params.SetAllowSocketAccess(true)
-	params.SetReuseLocalAddress(true)
-	params.SetProhibitFallback(true)
+	privateSetObject(params, "setRequiredInterface:", privateIface)
+	privateSetInt64(params, "setRequiredInterfaceType:", int64(profile.RequiredInterfaceType))
+	privateSetBool(params, "setUseAWDL:", profile.UseAWDL)
+	privateSetBool(params, "setUseP2P:", profile.UseP2P)
+	privateSetBool(params, "setAllowSocketAccess:", true)
+	privateSetBool(params, "setReuseLocalAddress:", true)
+	privateSetBool(params, "setProhibitFallback:", true)
 
-	requiredIface := params.RequiredInterface()
+	requiredIface := privateGetObject(params, "requiredInterface")
 	requiredName := ""
-	if requiredIface.GetID() != 0 {
-		requiredName = requiredIface.InterfaceName()
+	if requiredIface.ID != 0 {
+		requiredName = privateString(requiredIface, "interfaceName")
 	}
 	return privatePolicy{
 		RequiredInterfaceName: requiredName,
-		RequiredInterfaceType: params.RequiredInterfaceType(),
-		UseAWDL:               params.UseAWDL(),
-		UseP2P:                params.UseP2P(),
-		AllowSocketAccess:     params.AllowSocketAccess(),
-		ReuseLocalAddress:     params.ReuseLocalAddress(),
-		ProhibitFallback:      params.ProhibitFallback(),
-		Valid:                 params.IsValid(),
-		InterfaceType:         privateIface.Type(),
-		InterfaceTypeString:   privateIface.TypeString(),
-		InterfaceMTU:          privateIface.Mtu(),
-		InterfaceMulticast:    privateIface.SupportsMulticast(),
+		RequiredInterfaceType: privateInt64(params, "requiredInterfaceType"),
+		UseAWDL:               privateBool(params, "useAWDL"),
+		UseP2P:                privateBool(params, "useP2P"),
+		AllowSocketAccess:     privateBool(params, "allowSocketAccess"),
+		ReuseLocalAddress:     privateBool(params, "reuseLocalAddress"),
+		ProhibitFallback:      privateBool(params, "prohibitFallback"),
+		Valid:                 privateBool(params, "isValid"),
+		InterfaceType:         privateInt64(privateIface, "type"),
+		InterfaceTypeString:   privateString(privateIface, "typeString"),
+		InterfaceMTU:          privateInt64(privateIface, "mtu"),
+		InterfaceMulticast:    privateBool(privateIface, "supportsMulticast"),
 	}, nil
+}
+
+func newPrivateNWParameters() objectivec.Object {
+	return objectivec.ObjectFromID(objc.Send[objc.ID](objc.ID(objc.GetClass("NWParameters")), objc.Sel("new")))
+}
+
+func newPrivateNWInterfaceWithName(name string) objectivec.Object {
+	instance := objc.Send[objc.ID](objc.ID(objc.GetClass("NWInterface")), objc.Sel("alloc"))
+	return objectivec.ObjectFromID(objc.Send[objc.ID](instance, objc.Sel("initWithInterfaceName:"), objectivec.ObjectFromID(objc.String(name))))
+}
+
+func privateSetObject(obj objectivec.Object, selector string, value objectivec.Object) {
+	objc.Send[struct{}](obj.ID, objc.Sel(selector), value)
+}
+
+func privateSetBool(obj objectivec.Object, selector string, value bool) {
+	objc.Send[struct{}](obj.ID, objc.Sel(selector), value)
+}
+
+func privateSetInt64(obj objectivec.Object, selector string, value int64) {
+	objc.Send[struct{}](obj.ID, objc.Sel(selector), value)
+}
+
+func privateGetObject(obj objectivec.Object, selector string) objectivec.Object {
+	return objectivec.ObjectFromID(objc.Send[objc.ID](obj.ID, objc.Sel(selector)))
+}
+
+func privateBool(obj objectivec.Object, selector string) bool {
+	return objc.Send[bool](obj.ID, objc.Sel(selector))
+}
+
+func privateInt64(obj objectivec.Object, selector string) int64 {
+	return objc.Send[int64](obj.ID, objc.Sel(selector))
+}
+
+func privateString(obj objectivec.Object, selector string) string {
+	id := objc.Send[objc.ID](obj.ID, objc.Sel(selector))
+	if id == 0 {
+		return ""
+	}
+	return objc.IDToString(id)
 }
 
 func inspectInterface(name string) (linkInterface, error) {
@@ -312,14 +385,14 @@ func addrIP(addr net.Addr) net.IP {
 	}
 }
 
-func gather(ctx context.Context, iface linkInterface) error {
-	mux, err := newLinkUDPMux(iface)
+func gather(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend) error {
+	mux, err := newLinkUDPMux(profile, iface, backend)
 	if err != nil {
 		return err
 	}
 	defer mux.Close()
-	fmt.Printf("udp mux listen=%s network=%s bound_if=%s mdns=query-and-gather\n",
-		mux.conn.LocalAddr(), mux.network, boundIfString(iface, mux.bound))
+	fmt.Printf("udp mux listen=%s network=%s backend=%s bound_if=%s mdns=query-and-gather\n",
+		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound))
 	pc, err := newPeer(iface, mux)
 	if err != nil {
 		return err
@@ -359,21 +432,21 @@ func gather(ctx context.Context, iface linkInterface) error {
 	return nil
 }
 
-func pair(ctx context.Context, iface linkInterface) error {
-	leftMux, err := newLinkUDPMux(iface)
+func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend) error {
+	leftMux, err := newLinkUDPMux(profile, iface, backend)
 	if err != nil {
 		return err
 	}
 	defer leftMux.Close()
-	rightMux, err := newLinkUDPMux(iface)
+	rightMux, err := newLinkUDPMux(profile, iface, backend)
 	if err != nil {
 		return err
 	}
 	defer rightMux.Close()
-	fmt.Printf("left udp mux listen=%s network=%s bound_if=%s\n",
-		leftMux.conn.LocalAddr(), leftMux.network, boundIfString(iface, leftMux.bound))
-	fmt.Printf("right udp mux listen=%s network=%s bound_if=%s\n",
-		rightMux.conn.LocalAddr(), rightMux.network, boundIfString(iface, rightMux.bound))
+	fmt.Printf("left udp mux listen=%s network=%s backend=%s bound_if=%s\n",
+		leftMux.conn.LocalAddr(), leftMux.network, leftMux.backend, boundIfString(iface, leftMux.bound))
+	fmt.Printf("right udp mux listen=%s network=%s backend=%s bound_if=%s\n",
+		rightMux.conn.LocalAddr(), rightMux.network, rightMux.backend, boundIfString(iface, rightMux.bound))
 
 	left, err := newPeer(iface, leftMux)
 	if err != nil {
@@ -423,46 +496,48 @@ func pair(ctx context.Context, iface linkInterface) error {
 	}
 }
 
-func udpEcho(ctx context.Context, iface linkInterface, message string) error {
-	bindIf := shouldBindUDPToInterface(iface, "")
-	server, _, networkName, serverBound, err := listenUDPOnInterface(iface, bindIf)
+func udpEcho(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, message string) error {
+	serverLink, err := newLinkPacketConn(profile, iface, backend, "")
 	if err != nil {
 		return err
 	}
-	defer server.Close()
-	client, _, _, clientBound, err := listenUDPOnInterface(iface, bindIf)
+	defer serverLink.conn.Close()
+	clientLink, err := newLinkPacketConn(profile, iface, backend, "")
 	if err != nil {
 		return err
 	}
-	defer client.Close()
+	defer clientLink.conn.Close()
+	server := serverLink.conn
+	client := clientLink.conn
 
 	errc := make(chan error, 1)
 	go func() {
 		buf := make([]byte, 2048)
 		_ = server.SetReadDeadline(deadline(ctx))
-		n, addr, err := server.ReadFromUDP(buf)
+		n, addr, err := server.ReadFrom(buf)
 		if err != nil {
 			errc <- fmt.Errorf("server read: %w", err)
 			return
 		}
 		reply := append([]byte("echo:"), buf[:n]...)
-		if _, err := server.WriteToUDP(reply, addr); err != nil {
+		_ = server.SetWriteDeadline(deadline(ctx))
+		if _, err := server.WriteTo(reply, addr); err != nil {
 			errc <- fmt.Errorf("server write %s: %w", addr, err)
 			return
 		}
 		errc <- nil
 	}()
 
-	serverAddr := server.LocalAddr().(*net.UDPAddr)
-	clientAddr := client.LocalAddr().(*net.UDPAddr)
-	fmt.Printf("udp server=%s client=%s network=%s server_bound_if=%s client_bound_if=%s\n",
-		serverAddr, clientAddr, networkName, boundIfString(iface, serverBound), boundIfString(iface, clientBound))
-	if _, err := client.WriteToUDP([]byte(message), serverAddr); err != nil {
+	serverAddr := server.LocalAddr()
+	clientAddr := client.LocalAddr()
+	fmt.Printf("udp server=%s client=%s network=%s backend=%s server_bound_if=%s client_bound_if=%s\n",
+		serverAddr, clientAddr, serverLink.network, backend, boundIfString(iface, serverLink.bound), boundIfString(iface, clientLink.bound))
+	if _, err := client.WriteTo([]byte(message), serverAddr); err != nil {
 		return fmt.Errorf("client write %s: %w", serverAddr, err)
 	}
 	buf := make([]byte, 2048)
 	_ = client.SetReadDeadline(deadline(ctx))
-	n, from, err := client.ReadFromUDP(buf)
+	n, from, err := client.ReadFrom(buf)
 	if err != nil {
 		return fmt.Errorf("client read: %w", err)
 	}
@@ -477,30 +552,31 @@ func udpEcho(ctx context.Context, iface linkInterface, message string) error {
 	return nil
 }
 
-func udpListen(ctx context.Context, iface linkInterface) error {
-	bindIf := shouldBindUDPToInterface(iface, "")
-	conn, _, networkName, bound, err := listenUDPOnInterface(iface, bindIf)
+func udpListen(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend) error {
+	link, err := newLinkPacketConn(profile, iface, backend, "")
 	if err != nil {
 		return err
 	}
+	conn := link.conn
 	defer conn.Close()
-	fmt.Printf("udp listen=%s network=%s bound_if=%s\n",
-		conn.LocalAddr(), networkName, boundIfString(iface, bound))
+	fmt.Printf("udp listen=%s network=%s backend=%s bound_if=%s\n",
+		conn.LocalAddr(), link.network, link.backend, boundIfString(iface, link.bound))
 	buf := make([]byte, 2048)
 	_ = conn.SetReadDeadline(deadline(ctx))
-	n, addr, err := conn.ReadFromUDP(buf)
+	n, addr, err := conn.ReadFrom(buf)
 	if err != nil {
 		return fmt.Errorf("udp listen read: %w", err)
 	}
 	reply := append([]byte("echo:"), buf[:n]...)
-	if _, err := conn.WriteToUDP(reply, addr); err != nil {
+	_ = conn.SetWriteDeadline(deadline(ctx))
+	if _, err := conn.WriteTo(reply, addr); err != nil {
 		return fmt.Errorf("udp listen write %s: %w", addr, err)
 	}
 	fmt.Printf("udp received %q from %s and echoed reply\n", string(buf[:n]), addr)
 	return nil
 }
 
-func udpSend(ctx context.Context, iface linkInterface, peer, message string) error {
+func udpSend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer, message string) error {
 	if peer == "" {
 		return errors.New("missing -peer for udp-send")
 	}
@@ -508,24 +584,24 @@ func udpSend(ctx context.Context, iface linkInterface, peer, message string) err
 	if err != nil {
 		return err
 	}
-	bindIf := shouldBindUDPToInterface(iface, networkName)
-	conn, _, bound, err := listenUDPOnInterfaceNetwork(iface, networkName, bindIf)
+	link, err := newLinkPacketConn(profile, iface, backend, networkName)
 	if err != nil {
 		return err
 	}
+	conn := link.conn
 	defer conn.Close()
 	addr, err := net.ResolveUDPAddr(networkName, peer)
 	if err != nil {
 		return fmt.Errorf("resolve peer %q: %w", peer, err)
 	}
-	fmt.Printf("udp local=%s peer=%s network=%s bound_if=%s\n",
-		conn.LocalAddr(), addr, networkName, boundIfString(iface, bound))
-	if _, err := conn.WriteToUDP([]byte(message), addr); err != nil {
+	fmt.Printf("udp local=%s peer=%s network=%s backend=%s bound_if=%s\n",
+		conn.LocalAddr(), addr, networkName, link.backend, boundIfString(iface, link.bound))
+	if _, err := conn.WriteTo([]byte(message), addr); err != nil {
 		return fmt.Errorf("udp send %s: %w", addr, err)
 	}
 	buf := make([]byte, 2048)
 	_ = conn.SetReadDeadline(deadline(ctx))
-	n, from, err := conn.ReadFromUDP(buf)
+	n, from, err := conn.ReadFrom(buf)
 	if err != nil {
 		return fmt.Errorf("udp receive echo: %w", err)
 	}
@@ -541,26 +617,27 @@ type udpPerfResult struct {
 	RTT     []time.Duration
 }
 
-func udpPerf(ctx context.Context, iface linkInterface, count, size, warmup int) error {
-	bindIf := shouldBindUDPToInterface(iface, "")
-	server, _, networkName, serverBound, err := listenUDPOnInterface(iface, bindIf)
+func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup int) error {
+	serverLink, err := newLinkPacketConn(profile, iface, backend, "")
 	if err != nil {
 		return err
 	}
-	defer server.Close()
-	client, _, _, clientBound, err := listenUDPOnInterface(iface, bindIf)
+	defer serverLink.conn.Close()
+	clientLink, err := newLinkPacketConn(profile, iface, backend, "")
 	if err != nil {
 		return err
 	}
-	defer client.Close()
+	defer clientLink.conn.Close()
+	server := serverLink.conn
+	client := clientLink.conn
 
 	errc := make(chan error, 1)
 	go echoUDPPackets(ctx, server, count+warmup, errc)
 
-	serverAddr := server.LocalAddr().(*net.UDPAddr)
-	clientAddr := client.LocalAddr().(*net.UDPAddr)
-	fmt.Printf("udp perf server=%s client=%s network=%s server_bound_if=%s client_bound_if=%s\n",
-		serverAddr, clientAddr, networkName, boundIfString(iface, serverBound), boundIfString(iface, clientBound))
+	serverAddr := server.LocalAddr()
+	clientAddr := client.LocalAddr()
+	fmt.Printf("udp perf server=%s client=%s network=%s backend=%s server_bound_if=%s client_bound_if=%s\n",
+		serverAddr, clientAddr, serverLink.network, backend, boundIfString(iface, serverLink.bound), boundIfString(iface, clientLink.bound))
 	result, err := runUDPEchoPerf(ctx, client, serverAddr, count, size, warmup)
 	if err != nil {
 		return err
@@ -572,22 +649,22 @@ func udpPerf(ctx context.Context, iface linkInterface, count, size, warmup int) 
 	return nil
 }
 
-func udpPerfListen(ctx context.Context, iface linkInterface, expected int) error {
-	bindIf := shouldBindUDPToInterface(iface, "")
-	conn, _, networkName, bound, err := listenUDPOnInterface(iface, bindIf)
+func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, expected int) error {
+	link, err := newLinkPacketConn(profile, iface, backend, "")
 	if err != nil {
 		return err
 	}
+	conn := link.conn
 	defer conn.Close()
-	fmt.Printf("udp perf listen=%s network=%s bound_if=%s\n",
-		conn.LocalAddr(), networkName, boundIfString(iface, bound))
+	fmt.Printf("udp perf listen=%s network=%s backend=%s bound_if=%s\n",
+		conn.LocalAddr(), link.network, link.backend, boundIfString(iface, link.bound))
 
 	var packets, bytes int64
 	start := time.Now()
 	buf := make([]byte, 64*1024)
 	for {
 		_ = conn.SetReadDeadline(deadline(ctx))
-		n, addr, err := conn.ReadFromUDP(buf)
+		n, addr, err := conn.ReadFrom(buf)
 		if err != nil {
 			if ctx.Err() != nil || isTimeout(err) {
 				elapsed := time.Since(start)
@@ -598,7 +675,8 @@ func udpPerfListen(ctx context.Context, iface linkInterface, expected int) error
 		}
 		packets++
 		bytes += int64(n)
-		if _, err := conn.WriteToUDP(buf[:n], addr); err != nil {
+		_ = conn.SetWriteDeadline(deadline(ctx))
+		if _, err := conn.WriteTo(buf[:n], addr); err != nil {
 			return fmt.Errorf("udp perf listen write %s: %w", addr, err)
 		}
 		if expected > 0 && packets >= int64(expected) {
@@ -608,7 +686,7 @@ func udpPerfListen(ctx context.Context, iface linkInterface, expected int) error
 	}
 }
 
-func udpPerfSend(ctx context.Context, iface linkInterface, peer string, count, size, warmup int) error {
+func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup int) error {
 	if peer == "" {
 		return errors.New("missing -peer for udp-perf-send")
 	}
@@ -616,18 +694,18 @@ func udpPerfSend(ctx context.Context, iface linkInterface, peer string, count, s
 	if err != nil {
 		return err
 	}
-	bindIf := shouldBindUDPToInterface(iface, networkName)
-	conn, _, bound, err := listenUDPOnInterfaceNetwork(iface, networkName, bindIf)
+	link, err := newLinkPacketConn(profile, iface, backend, networkName)
 	if err != nil {
 		return err
 	}
+	conn := link.conn
 	defer conn.Close()
 	addr, err := net.ResolveUDPAddr(networkName, peer)
 	if err != nil {
 		return fmt.Errorf("resolve peer %q: %w", peer, err)
 	}
-	fmt.Printf("udp perf local=%s peer=%s network=%s bound_if=%s\n",
-		conn.LocalAddr(), addr, networkName, boundIfString(iface, bound))
+	fmt.Printf("udp perf local=%s peer=%s network=%s backend=%s bound_if=%s\n",
+		conn.LocalAddr(), addr, networkName, link.backend, boundIfString(iface, link.bound))
 	result, err := runUDPEchoPerf(ctx, conn, addr, count, size, warmup)
 	if err != nil {
 		return err
@@ -636,16 +714,17 @@ func udpPerfSend(ctx context.Context, iface linkInterface, peer string, count, s
 	return nil
 }
 
-func echoUDPPackets(ctx context.Context, conn *net.UDPConn, count int, errc chan<- error) {
+func echoUDPPackets(ctx context.Context, conn net.PacketConn, count int, errc chan<- error) {
 	buf := make([]byte, 64*1024)
 	for i := 0; i < count; i++ {
 		_ = conn.SetReadDeadline(deadline(ctx))
-		n, addr, err := conn.ReadFromUDP(buf)
+		n, addr, err := conn.ReadFrom(buf)
 		if err != nil {
 			errc <- fmt.Errorf("udp perf server read: %w", err)
 			return
 		}
-		if _, err := conn.WriteToUDP(buf[:n], addr); err != nil {
+		_ = conn.SetWriteDeadline(deadline(ctx))
+		if _, err := conn.WriteTo(buf[:n], addr); err != nil {
 			errc <- fmt.Errorf("udp perf server write %s: %w", addr, err)
 			return
 		}
@@ -653,7 +732,7 @@ func echoUDPPackets(ctx context.Context, conn *net.UDPConn, count int, errc chan
 	errc <- nil
 }
 
-func runUDPEchoPerf(ctx context.Context, conn *net.UDPConn, addr *net.UDPAddr, count, size, warmup int) (udpPerfResult, error) {
+func runUDPEchoPerf(ctx context.Context, conn net.PacketConn, addr net.Addr, count, size, warmup int) (udpPerfResult, error) {
 	if count <= 0 {
 		return udpPerfResult{}, errors.New("udp perf -count must be positive")
 	}
@@ -688,14 +767,15 @@ func runUDPEchoPerf(ctx context.Context, conn *net.UDPConn, addr *net.UDPAddr, c
 	}, nil
 }
 
-func udpEchoOnce(ctx context.Context, conn *net.UDPConn, addr *net.UDPAddr, send, recv []byte, seq int) error {
+func udpEchoOnce(ctx context.Context, conn net.PacketConn, addr net.Addr, send, recv []byte, seq int) error {
 	binary.BigEndian.PutUint64(send[:8], uint64(seq))
 	fillPayload(send[8:], byte(seq))
-	if _, err := conn.WriteToUDP(send, addr); err != nil {
+	_ = conn.SetWriteDeadline(deadline(ctx))
+	if _, err := conn.WriteTo(send, addr); err != nil {
 		return fmt.Errorf("write %s: %w", addr, err)
 	}
 	_ = conn.SetReadDeadline(deadline(ctx))
-	n, from, err := conn.ReadFromUDP(recv)
+	n, from, err := conn.ReadFrom(recv)
 	if err != nil {
 		return fmt.Errorf("read: %w", err)
 	}
@@ -812,14 +892,64 @@ func isTimeout(err error) bool {
 	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
-func newLinkUDPMux(iface linkInterface) (*linkUDPMux, error) {
-	bindIf := shouldBindUDPToInterface(iface, "")
-	conn, ip, networkName, bound, err := listenUDPOnInterface(iface, bindIf)
+func newLinkUDPMux(profile linkProfile, iface linkInterface, backend udpBackend) (*linkUDPMux, error) {
+	link, err := newLinkPacketConn(profile, iface, backend, "")
 	if err != nil {
 		return nil, err
 	}
-	mux := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn})
-	return &linkUDPMux{conn: conn, mux: mux, ip: ip, network: networkName, bound: bound}, nil
+	mux := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: link.conn})
+	return &linkUDPMux{
+		conn:    link.conn,
+		mux:     mux,
+		ip:      link.ip,
+		network: link.network,
+		bound:   link.bound,
+		backend: link.backend,
+	}, nil
+}
+
+func newLinkPacketConn(profile linkProfile, iface linkInterface, backend udpBackend, networkName string) (*linkPacketConn, error) {
+	switch backend {
+	case udpBackendGo:
+		return newGoLinkPacketConn(iface, networkName)
+	case udpBackendNetwork:
+		return newNetworkLinkPacketConn(profile, iface, networkName)
+	default:
+		return nil, fmt.Errorf("unsupported UDP backend %q", backend)
+	}
+}
+
+func newGoLinkPacketConn(iface linkInterface, networkName string) (*linkPacketConn, error) {
+	if networkName == "" {
+		bindIf := shouldBindUDPToInterface(iface, "")
+		conn, ip, networkName, bound, err := listenUDPOnInterface(iface, bindIf)
+		if err != nil {
+			return nil, err
+		}
+		return &linkPacketConn{conn: conn, ip: ip, network: networkName, bound: bound, backend: udpBackendGo}, nil
+	}
+	bindIf := shouldBindUDPToInterface(iface, networkName)
+	conn, ip, bound, err := listenUDPOnInterfaceNetwork(iface, networkName, bindIf)
+	if err != nil {
+		return nil, err
+	}
+	return &linkPacketConn{conn: conn, ip: ip, network: networkName, bound: bound, backend: udpBackendGo}, nil
+}
+
+func newNetworkLinkPacketConn(profile linkProfile, iface linkInterface, networkName string) (*linkPacketConn, error) {
+	ip, resolvedNetwork, zone, err := listenIP(iface)
+	if networkName != "" {
+		ip, zone, err = listenIPForNetwork(iface, networkName)
+		resolvedNetwork = networkName
+	}
+	if err != nil {
+		return nil, err
+	}
+	conn, err := newNWPacketConn(profile, iface, ip, zone, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &linkPacketConn{conn: conn, ip: ip, network: resolvedNetwork, bound: true, backend: udpBackendNetwork}, nil
 }
 
 func listenUDPOnInterface(iface linkInterface, bindIf bool) (*net.UDPConn, net.IP, string, bool, error) {
@@ -894,7 +1024,6 @@ func (m *linkUDPMux) Close() {
 	}
 	if m.mux != nil {
 		_ = m.mux.Close()
-		return
 	}
 	if m.conn != nil {
 		_ = m.conn.Close()

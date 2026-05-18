@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/pion/ice/v4 v4.2.5
 	github.com/pion/webrtc/v4 v4.2.12
-	github.com/tmc/apple v0.0.0
+	github.com/tmc/apple v0.6.3
 	golang.org/x/sys v0.41.0
 )
 
@@ -31,5 +31,3 @@ require (
 	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 )
-
-replace github.com/tmc/apple => /Users/tmc/go/src/github.com/tmc/apple
