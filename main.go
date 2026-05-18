@@ -24,6 +24,7 @@ import (
 	applenetwork "github.com/tmc/apple/network"
 	"github.com/tmc/apple/objc"
 	"github.com/tmc/apple/objectivec"
+	"github.com/tmc/awdl-webrtc-apple-demo/internal/nwpacket"
 	"golang.org/x/sys/unix"
 )
 
@@ -1189,11 +1190,28 @@ func newNetworkLinkPacketConn(profile linkProfile, iface linkInterface, networkN
 	if err != nil {
 		return nil, err
 	}
-	conn, err := newNWPacketConn(profile, iface, ip, zone, 0)
+	conn, err := nwpacket.ListenPacket(nwpacket.Config{
+		InterfaceName:         iface.Name,
+		LocalAddr:             &net.UDPAddr{IP: ip, Zone: zone},
+		RequiredInterfaceType: profile.RequiredInterfaceType,
+		SetRequiredInterface:  profile.Name != "thunderbolt",
+		IncludePeerToPeer:     profile.IncludePeerToPeer,
+		RequireInterface:      profile.Name == "awdl",
+		ReuseLocalAddress:     true,
+		QueueLabel:            "com.github.tmc.awdl-webrtc-apple-demo.network-packetconn",
+		Tracef:                networkTracef,
+	})
 	if err != nil {
 		return nil, err
 	}
 	return &linkPacketConn{conn: conn, ip: ip, network: resolvedNetwork, bound: true, backend: udpBackendNetwork}, nil
+}
+
+func networkTracef(format string, args ...any) {
+	if os.Getenv("AWDL_DEMO_NETWORK_TRACE") == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "nwtrace: "+format+"\n", args...)
 }
 
 func listenUDPOnInterface(iface linkInterface, bindIf bool) (*net.UDPConn, net.IP, string, bool, error) {

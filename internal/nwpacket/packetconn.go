@@ -1,12 +1,11 @@
 //go:build darwin
 
-package main
+package nwpacket
 
 import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,7 +18,24 @@ import (
 	"github.com/tmc/apple/objectivec"
 )
 
-var networkTrace = os.Getenv("AWDL_DEMO_NETWORK_TRACE") != ""
+// Config describes a Network.framework UDP packet connection.
+type Config struct {
+	// InterfaceName is used for link-local zones and optional exact interface
+	// selection.
+	InterfaceName string
+
+	// LocalAddr is the local UDP address to bind. Port 0 asks Network.framework
+	// to choose a port.
+	LocalAddr *net.UDPAddr
+
+	RequiredInterfaceType applenetwork.NWInterfaceType
+	SetRequiredInterface  bool
+	IncludePeerToPeer     bool
+	RequireInterface      bool
+	ReuseLocalAddress     bool
+	QueueLabel            string
+	Tracef                func(format string, args ...any)
+}
 
 type nwPacket struct {
 	data []byte
@@ -34,8 +50,7 @@ type nwPeerConn struct {
 }
 
 type nwPacketConn struct {
-	profile linkProfile
-	iface   linkInterface
+	config Config
 
 	queue    dispatch.Queue
 	listener applenetwork.NWListener
@@ -54,9 +69,19 @@ type nwPacketConn struct {
 	writeDeadlineChanged chan struct{}
 }
 
-func newNWPacketConn(profile linkProfile, iface linkInterface, ip net.IP, zone string, port int) (*nwPacketConn, error) {
-	local := &net.UDPAddr{IP: append(net.IP(nil), ip...), Port: port, Zone: zone}
-	params, err := newNWParameters(profile, iface, local)
+// ListenPacket creates a Network.framework-backed net.PacketConn.
+func ListenPacket(config Config) (net.PacketConn, error) {
+	if config.LocalAddr == nil {
+		return nil, errors.New("missing local address")
+	}
+	if config.InterfaceName == "" && config.LocalAddr.Zone != "" {
+		config.InterfaceName = config.LocalAddr.Zone
+	}
+	if config.QueueLabel == "" {
+		config.QueueLabel = "com.github.tmc.awdl-webrtc-apple-demo.network-packetconn"
+	}
+	local := copyUDPAddr(config.LocalAddr)
+	params, err := newNWParameters(config, local)
 	if err != nil {
 		return nil, err
 	}
@@ -66,9 +91,8 @@ func newNWPacketConn(profile linkProfile, iface linkInterface, ip net.IP, zone s
 	}
 
 	c := &nwPacketConn{
-		profile:              profile,
-		iface:                iface,
-		queue:                dispatch.QueueCreate("com.github.tmc.awdl-webrtc-apple-demo.network-packetconn"),
+		config:               config,
+		queue:                dispatch.QueueCreate(config.QueueLabel),
 		listener:             listener,
 		local:                local,
 		packets:              make(chan nwPacket, 16384),
@@ -81,7 +105,7 @@ func newNWPacketConn(profile linkProfile, iface linkInterface, ip net.IP, zone s
 	ready := make(chan error, 1)
 	applenetwork.NWListenerSetQueue(listener, c.queue)
 	applenetwork.NWListenerSetStateChangedHandler(listener, func(state applenetwork.NWListenerState, nwErr applenetwork.NWError) {
-		traceNW("listener %s state=%s err=%s", c.local, state, nwErrorString(nwErr))
+		c.tracef("listener %s state=%s err=%s", c.local, state, nwErrorString(nwErr))
 		switch state {
 		case applenetwork.NWListenerStateReady:
 			select {
@@ -124,7 +148,7 @@ func newNWPacketConn(profile linkProfile, iface linkInterface, ip net.IP, zone s
 	return c, nil
 }
 
-func newNWParameters(profile linkProfile, iface linkInterface, local *net.UDPAddr) (params applenetwork.NWParameters, err error) {
+func newNWParameters(config Config, local *net.UDPAddr) (params applenetwork.NWParameters, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("configure nw parameters: %v", r)
@@ -144,35 +168,42 @@ func newNWParameters(profile linkProfile, iface linkInterface, local *net.UDPAdd
 	}
 	applenetwork.NWProtocolStackClearApplicationProtocols(stack)
 	applenetwork.NWProtocolStackSetTransportProtocol(stack, udpOptions)
-	applenetwork.NWParametersSetIncludePeerToPeer(params, profile.IncludePeerToPeer)
-	if profile.Name != "thunderbolt" {
-		applenetwork.NWParametersSetRequiredInterfaceType(params, profile.RequiredInterfaceType)
+	applenetwork.NWParametersSetIncludePeerToPeer(params, config.IncludePeerToPeer)
+	if config.SetRequiredInterface {
+		applenetwork.NWParametersSetRequiredInterfaceType(params, config.RequiredInterfaceType)
 	}
-	applenetwork.NWParametersSetReuseLocalAddress(params, true)
+	applenetwork.NWParametersSetReuseLocalAddress(params, config.ReuseLocalAddress)
 	if local != nil {
 		applenetwork.NWParametersSetLocalEndpoint(params, nwEndpointForUDPAddr(local))
 	}
-	if networkBackendRequireInterface || profile.Name == "awdl" {
-		if err := requireNWInterface(params, iface); err != nil {
+	if config.RequireInterface {
+		if err := requireNWInterface(params, config.InterfaceName); err != nil {
 			return applenetwork.NWParameters{}, err
 		}
 	}
 	return params, nil
 }
 
-const networkBackendRequireInterface = false
-
-func requireNWInterface(params applenetwork.NWParameters, iface linkInterface) error {
-	privateIface := newPrivateNWInterfaceWithName(iface.Name)
+func requireNWInterface(params applenetwork.NWParameters, name string) error {
+	privateIface := newPrivateNWInterfaceWithName(name)
 	if privateIface.ID == 0 {
-		return fmt.Errorf("private NWInterface(%s) returned nil", iface.Name)
+		return fmt.Errorf("private NWInterface(%s) returned nil", name)
 	}
 	ciface := privateGetObject(privateIface, "cInterface")
 	if ciface.ID == 0 {
-		return fmt.Errorf("private NWInterface(%s).cInterface returned nil", iface.Name)
+		return fmt.Errorf("private NWInterface(%s).cInterface returned nil", name)
 	}
 	applenetwork.NWParametersRequireInterface(params, applenetwork.NWInterfaceFromID(ciface.ID))
 	return nil
+}
+
+func newPrivateNWInterfaceWithName(name string) objectivec.Object {
+	instance := objc.Send[objc.ID](objc.ID(objc.GetClass("NWInterface")), objc.Sel("alloc"))
+	return objectivec.ObjectFromID(objc.Send[objc.ID](instance, objc.Sel("initWithInterfaceName:"), objectivec.ObjectFromID(objc.String(name))))
+}
+
+func privateGetObject(obj objectivec.Object, selector string) objectivec.Object {
+	return objectivec.ObjectFromID(objc.Send[objc.ID](obj.ID, objc.Sel(selector)))
 }
 
 func (c *nwPacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
@@ -234,7 +265,7 @@ func (c *nwPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	context := applenetwork.NWContentContextCreate(fmt.Sprintf("awdl-webrtc-apple-demo-%d", c.sendSeq.Add(1)))
 	done := make(chan error, 1)
 	applenetwork.NWConnectionSend(peer.conn, data, context, true, func(nwErr applenetwork.NWError) {
-		traceNW("send %s bytes=%d err=%s", peer.addr, len(b), nwErrorString(nwErr))
+		c.tracef("send %s bytes=%d err=%s", peer.addr, len(b), nwErrorString(nwErr))
 		data.Release()
 		if context.ID != 0 {
 			context.Release()
@@ -318,7 +349,7 @@ func (c *nwPacketConn) accept(conn applenetwork.NWConnection) {
 
 	applenetwork.NWConnectionSetQueue(conn, c.queue)
 	applenetwork.NWConnectionSetStateChangedHandler(conn, func(state applenetwork.NWConnectionState, nwErr applenetwork.NWError) {
-		traceNW("accepted %s state=%s err=%s", addr, state, nwErrorString(nwErr))
+		c.tracef("accepted %s state=%s err=%s", addr, state, nwErrorString(nwErr))
 		switch state {
 		case applenetwork.NWConnectionStateReady:
 			peer.markReady(nil)
@@ -340,7 +371,7 @@ func (c *nwPacketConn) peerConn(addr net.Addr) (*nwPeerConn, error) {
 		return nil, err
 	}
 	if udpAddr.Zone == "" && udpAddr.IP.To4() == nil && udpAddr.IP.IsLinkLocalUnicast() {
-		udpAddr.Zone = c.iface.Name
+		udpAddr.Zone = c.config.InterfaceName
 	}
 	key := udpAddr.String()
 	c.mu.Lock()
@@ -350,7 +381,7 @@ func (c *nwPacketConn) peerConn(addr net.Addr) (*nwPeerConn, error) {
 	}
 	c.mu.Unlock()
 
-	params, err := newNWParameters(c.profile, c.iface, nil)
+	params, err := newNWParameters(c.config, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -362,9 +393,9 @@ func (c *nwPacketConn) peerConn(addr net.Addr) (*nwPeerConn, error) {
 	peer := &nwPeerConn{conn: conn, addr: udpAddr, ready: make(chan error, 1)}
 	applenetwork.NWConnectionSetQueue(conn, c.queue)
 	applenetwork.NWConnectionSetStateChangedHandler(conn, func(state applenetwork.NWConnectionState, nwErr applenetwork.NWError) {
-		traceNW("outbound %s state=%s err=%s", udpAddr, state, nwErrorString(nwErr))
+		c.tracef("outbound %s state=%s err=%s", udpAddr, state, nwErrorString(nwErr))
 		if state == applenetwork.NWConnectionStateReady {
-			traceNW("outbound %s path=%s", udpAddr, c.connectionPath(conn))
+			c.tracef("outbound %s path=%s", udpAddr, c.connectionPath(conn))
 		}
 		switch state {
 		case applenetwork.NWConnectionStateReady:
@@ -459,7 +490,7 @@ func (c *nwPacketConn) connectionEndpoint(conn applenetwork.NWConnection) *net.U
 	if endpoint.ID == 0 {
 		return &net.UDPAddr{}
 	}
-	addr, err := nwEndpointToUDPAddr(endpoint, c.iface.Name)
+	addr, err := nwEndpointToUDPAddr(endpoint, c.config.InterfaceName)
 	if err != nil {
 		return &net.UDPAddr{}
 	}
@@ -565,16 +596,16 @@ func (e nwTimeoutError) Temporary() bool {
 	return true
 }
 
-func traceNW(format string, args ...any) {
-	if !networkTrace {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "nwtrace: "+format+"\n", args...)
-}
-
 func nwErrorString(err applenetwork.NWError) string {
 	if err.IsZero() {
 		return "-"
 	}
 	return fmt.Sprintf("%s domain=%s code=%d", err.Error(), err.DomainString(), err.Code())
+}
+
+func (c *nwPacketConn) tracef(format string, args ...any) {
+	if c.config.Tracef == nil {
+		return
+	}
+	c.config.Tracef(format, args...)
 }
