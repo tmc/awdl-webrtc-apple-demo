@@ -165,8 +165,10 @@ SSH_TARGET=tmc2@10.0.18.249 \
 The script records local reachability diagnostics for `SSH_TARGET`, checks SSH,
 then builds a temporary local binary, copies it to `REMOTE_BIN` on the peer, and
 runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus Network.framework UDP
-perf, simultaneous bidirectional perf, latency, and callback probes. After
-setup, per-profile probes continue after failures and end with a matrix summary
+perf, simultaneous bidirectional perf, latency, and callback probes. On a
+reachability failure, the transcript includes a normal `FAIL:` line so
+`cmd/matrix-summary` can still render the setup blocker in its Markdown table.
+After setup, per-profile probes continue after failures and end with a matrix summary
 so one asymmetric UDP direction does not hide later evidence. The
 UDP probes record listener-side route, `lsof`, and `netstat` output for the
 printed listener host/port plus sender-side route checks before sending, so
