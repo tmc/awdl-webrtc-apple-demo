@@ -141,7 +141,9 @@ go run . -profile awdl -backend network -pion-net -mdns disabled \
 To rerun the two-host productization matrix after the peer is reachable, use:
 
 ```sh
-SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh
+SSH_TARGET=tmc2@10.0.18.249 \
+  OUTPUT=/tmp/awdl-webrtc-matrix.txt \
+  scripts/remote-matrix.sh
 ```
 
 Before the matrix, capture the interface and route state from both Macs:
@@ -161,13 +163,13 @@ Network.framework UDP perf, latency, and callback probes in both directions.
 After setup, per-profile probes continue after failures and end with a matrix
 summary so one asymmetric UDP direction does not hide later evidence.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
-`STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `NW_CONNECT_TIMEOUT`, or
-`NW_CONNECT_RETRIES` to narrow, lengthen, or tune a run. When `DURATION` is set,
-sender trials run for that duration instead of a fixed datagram count and
-listeners run until their timeout. Set `REQUIRE_PATHS=1` to add
-`-require-path-interface` and `-forbid-loopback-path` to sender runs; LAN
-defaults to `en0`, AWDL defaults to `awdl0`, and Thunderbolt uses
-`THUNDERBOLT_PATH_INTERFACE` when set.
+`STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `OUTPUT`,
+`NW_CONNECT_TIMEOUT`, or `NW_CONNECT_RETRIES` to narrow, lengthen, save, or tune
+a run. When `DURATION` is set, sender trials run for that duration instead of a
+fixed datagram count and listeners run until their timeout. Set
+`REQUIRE_PATHS=1` to add `-require-path-interface` and `-forbid-loopback-path`
+to sender runs; LAN defaults to `en0`, AWDL defaults to `awdl0`, and
+Thunderbolt uses `THUNDERBOLT_PATH_INTERFACE` when set.
 
 Before cutting releases or removing local module replaces, run:
 

@@ -38,10 +38,12 @@ SSH_TARGET=tmc2@10.0.18.249 \
 
 REQUIRE_PATHS=1 \
 SSH_TARGET=tmc2@10.0.18.249 \
+OUTPUT=/tmp/awdl-webrtc-matrix.txt \
 scripts/remote-matrix.sh
 
 DURATION=10s TRIALS=5 WINDOW=8 STREAMS=2 REQUIRE_PATHS=1 \
 SSH_TARGET=tmc2@10.0.18.249 \
+OUTPUT=/tmp/awdl-webrtc-matrix-long.txt \
 scripts/remote-matrix.sh
 ```
 

@@ -21,6 +21,12 @@ require_paths=${REQUIRE_PATHS:-0}
 lan_path_interface=${LAN_PATH_INTERFACE:-en0}
 awdl_path_interface=${AWDL_PATH_INTERFACE:-awdl0}
 thunderbolt_path_interface=${THUNDERBOLT_PATH_INTERFACE:-}
+output=${OUTPUT:-}
+
+if [[ -n $output ]]; then
+	mkdir -p "$(dirname "$output")"
+	exec > >(tee "$output") 2>&1
+fi
 
 sq() {
 	local s=${1//\'/\'\\\'\'}
@@ -340,6 +346,28 @@ record_matrix_step() {
 		matrix_failures=$((matrix_failures + 1))
 	fi
 }
+
+printf '## matrix config\n'
+printf 'ssh_target=%s\n' "$ssh_target"
+printf 'profiles=%s\n' "$profiles"
+printf 'count=%s\n' "$count"
+printf 'duration=%s\n' "$duration"
+printf 'warmup=%s\n' "$warmup"
+printf 'size=%s\n' "$size"
+printf 'trials=%s\n' "$trials"
+printf 'window=%s\n' "$window"
+printf 'streams=%s\n' "$streams"
+printf 'timeout=%s\n' "$timeout"
+printf 'connect_timeout=%s\n' "$connect_timeout"
+printf 'nw_connect_timeout=%s\n' "$nw_connect_timeout"
+printf 'nw_connect_retries=%s\n' "$nw_connect_retries"
+printf 'require_paths=%s\n' "$require_paths"
+printf 'lan_path_interface=%s\n' "$lan_path_interface"
+printf 'awdl_path_interface=%s\n' "$awdl_path_interface"
+printf 'thunderbolt_path_interface=%s\n' "$thunderbolt_path_interface"
+printf 'local_bin=%s\n' "$local_bin"
+printf 'remote_bin=%s\n' "$remote_bin"
+printf 'output=%s\n' "$output"
 
 printf '## remote reachability\n'
 remote "true"
