@@ -98,6 +98,7 @@ require_published_module() {
 }
 
 section "local gates"
+run bash -n "$demo_dir/scripts/remote-diagnostics.sh"
 run bash -n "$demo_dir/scripts/remote-matrix.sh"
 run env GOWORK=off go -C "$demo_dir" test ./...
 run env GOWORK=off go -C "$demo_dir" vet ./...
