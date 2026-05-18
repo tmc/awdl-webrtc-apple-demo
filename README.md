@@ -140,10 +140,10 @@ SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh
 The script builds a temporary local binary, copies it to `REMOTE_BIN` on the
 peer, then runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus
 Network.framework UDP perf and callback probes in both directions. Override
-`PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`, `TIMEOUT`,
-`LOCAL_BIN`, or `REMOTE_BIN` to narrow or lengthen a run. When `DURATION` is
-set, sender trials run for that duration instead of a fixed datagram count and
-listeners run until their timeout.
+`PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`, `STREAMS`,
+`TIMEOUT`, `LOCAL_BIN`, or `REMOTE_BIN` to narrow or lengthen a run. When
+`DURATION` is set, sender trials run for that duration instead of a fixed
+datagram count and listeners run until their timeout.
 
 Before cutting releases or removing local module replaces, run:
 
@@ -169,11 +169,12 @@ summary when more than one trial runs. `-duration` makes each trial run for a
 fixed time instead of a fixed `-count`; the JSON record includes both the
 requested `duration_ns` and the actual elapsed time. `-window` sets the maximum
 number of in-flight echo requests for bounded pipelining; the default `1`
-preserves the serial request/echo behavior. Use `-perf-json` to also print JSON
-result records per trial plus an aggregate summary or listener summary. Echo
-timeouts are counted as lost datagrams after `-packet-timeout`, while write and
-corrupt-reply errors still fail the run. This is a smoke benchmark, not a
-replacement for `iperf3`.
+preserves the serial request/echo behavior. `-streams` opens multiple client
+PacketConns and aggregates the concurrent stream results into one trial record.
+Use `-perf-json` to also print JSON result records per trial plus an aggregate
+summary or listener summary. Echo timeouts are counted as lost datagrams after
+`-packet-timeout`, while write and corrupt-reply errors still fail the run. This
+is a smoke benchmark, not a replacement for `iperf3`.
 
 For a two-host AWDL UDP proof, run the listener on one Mac:
 
@@ -188,7 +189,7 @@ Then send to the printed scoped address from another Mac:
 ```sh
 go run . -profile awdl -backend go -mode udp-send -peer '[fe80::peer%awdl0]:12345' -timeout 10s
 go run . -profile awdl -backend go -mode udp-callback-request -peer '[fe80::peer%awdl0]:12345' -message ping -timeout 10s
-go run . -profile awdl -backend go -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -duration 10s -size 1200 -warmup 5 -trials 3 -window 4 -perf-json -timeout 40s
+go run . -profile awdl -backend go -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -duration 10s -size 1200 -warmup 5 -trials 3 -window 4 -streams 2 -perf-json -timeout 40s
 ```
 
 The callback probe sends a small JSON request containing a temporary callback
