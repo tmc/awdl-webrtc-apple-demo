@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"testing"
@@ -98,3 +99,53 @@ func TestUDPPerfListenRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRunUDPEchoPerfCountsReadTimeoutsAsLoss(t *testing.T) {
+	conn := &timeoutPacketConn{}
+	result, err := runUDPEchoPerf(context.Background(), conn, &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9}, 3, 16, 0, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Lost != 3 || len(result.RTT) != 0 {
+		t.Fatalf("result lost=%d rtt=%d, want 3 lost and 0 rtt", result.Lost, len(result.RTT))
+	}
+	if conn.writes != 3 {
+		t.Fatalf("writes = %d, want 3", conn.writes)
+	}
+}
+
+func TestPacketDeadlineUsesEarlierContextDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	got := packetDeadline(ctx, time.Second)
+	if time.Until(got) > 100*time.Millisecond {
+		t.Fatalf("packetDeadline ignored context deadline: %s", got)
+	}
+}
+
+type timeoutPacketConn struct {
+	writes int
+}
+
+func (c *timeoutPacketConn) ReadFrom([]byte) (int, net.Addr, error) {
+	return 0, nil, timeoutError{}
+}
+
+func (c *timeoutPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
+	c.writes++
+	return len(b), nil
+}
+
+func (c *timeoutPacketConn) Close() error                     { return nil }
+func (c *timeoutPacketConn) LocalAddr() net.Addr              { return &net.UDPAddr{} }
+func (c *timeoutPacketConn) SetDeadline(time.Time) error      { return nil }
+func (c *timeoutPacketConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *timeoutPacketConn) SetWriteDeadline(time.Time) error { return nil }
+
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "timeout" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+var _ net.Error = timeoutError{}

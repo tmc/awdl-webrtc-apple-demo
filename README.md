@@ -122,8 +122,10 @@ The `udp-perf` mode runs a small iperf-like request/echo benchmark over the
 same sockets and prints transfer, bitrate, datagram count, loss, and RTT
 summary columns. The `-warmup` packets are omitted from the summary, and
 `-trials` repeats the same run on one connection. Use `-perf-json` to also
-print one JSON result record per trial or listener summary. This is a smoke
-benchmark, not a replacement for `iperf3`.
+print one JSON result record per trial or listener summary. Echo timeouts are
+counted as lost datagrams after `-packet-timeout`, while write and corrupt-reply
+errors still fail the run. This is a smoke benchmark, not a replacement for
+`iperf3`.
 
 For a two-host AWDL UDP proof, run the listener on one Mac:
 
