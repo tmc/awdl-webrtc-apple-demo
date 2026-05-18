@@ -24,6 +24,7 @@ import (
 	applenetwork "github.com/tmc/apple/network"
 	"github.com/tmc/apple/objc"
 	"github.com/tmc/apple/objectivec"
+	"github.com/tmc/awdl-webrtc-apple-demo/internal/icepolicy"
 	"github.com/tmc/awdl-webrtc-apple-demo/internal/nwpacket"
 	"golang.org/x/sys/unix"
 )
@@ -117,6 +118,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+	candidatePolicy := icepolicy.Policy{RawHostCandidates: *rawCandidates}
 	if *ifaceName != "" {
 		profile.DefaultInterface = *ifaceName
 	}
@@ -176,19 +178,19 @@ func main() {
 	case "check":
 		fmt.Printf("pion webrtc interface_filter=%s network_types=udp4,udp6 mdns=%s udp_backend=%s\n", iface.Name, mdnsModeString(mdnsMode), backend)
 	case "gather":
-		if err := gather(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, *rawCandidates); err != nil {
+		if err := gather(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, candidatePolicy); err != nil {
 			fail(err)
 		}
 	case "pair":
-		if err := pair(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, *rawCandidates); err != nil {
+		if err := pair(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, candidatePolicy); err != nil {
 			fail(err)
 		}
 	case "answer-stdio":
-		if err := answerStdio(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, *rawCandidates); err != nil {
+		if err := answerStdio(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, candidatePolicy); err != nil {
 			fail(err)
 		}
 	case "offer-ssh":
-		if err := offerSSH(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, *rawCandidates, *timeout, *sshTarget, *remoteBin); err != nil {
+		if err := offerSSH(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, candidatePolicy, *timeout, *sshTarget, *remoteBin); err != nil {
 			fail(err)
 		}
 	case "udp":
@@ -433,15 +435,15 @@ func addrIP(addr net.Addr) net.IP {
 	}
 }
 
-func gather(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, rawCandidates bool) error {
+func gather(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) error {
 	mux, err := newLinkUDPMux(profile, iface, backend)
 	if err != nil {
 		return err
 	}
 	defer mux.Close()
 	fmt.Printf("udp mux listen=%s network=%s backend=%s bound_if=%s mdns=%s raw_candidates=%t\n",
-		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), rawCandidates)
-	pc, err := newPeer(iface, mux, mdnsMode, rawCandidates)
+		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), candidatePolicy.RawHostCandidates)
+	pc, err := newPeer(iface, mux, mdnsMode, candidatePolicy)
 	if err != nil {
 		return err
 	}
@@ -467,9 +469,7 @@ func gather(ctx context.Context, profile linkProfile, iface linkInterface, backe
 		return errors.New("missing local description after gather")
 	}
 	sdp := desc.SDP
-	if rawCandidates {
-		sdp = rewriteHostCandidateAddress(sdp, mux.ip)
-	}
+	sdp = candidatePolicy.Publish(sdp, mux.ip)
 	candidates := candidateLines(sdp)
 	if len(candidates) == 0 {
 		return fmt.Errorf("no ICE candidates gathered for %s", iface.Name)
@@ -484,7 +484,7 @@ func gather(ctx context.Context, profile linkProfile, iface linkInterface, backe
 	return nil
 }
 
-func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, rawCandidates bool) error {
+func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) error {
 	leftMux, err := newLinkUDPMux(profile, iface, backend)
 	if err != nil {
 		return err
@@ -500,12 +500,12 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 	fmt.Printf("right udp mux listen=%s network=%s backend=%s bound_if=%s\n",
 		rightMux.conn.LocalAddr(), rightMux.network, rightMux.backend, boundIfString(iface, rightMux.bound))
 
-	left, err := newPeer(iface, leftMux, mdnsMode, rawCandidates)
+	left, err := newPeer(iface, leftMux, mdnsMode, candidatePolicy)
 	if err != nil {
 		return err
 	}
 	defer left.Close()
-	right, err := newPeer(iface, rightMux, mdnsMode, rawCandidates)
+	right, err := newPeer(iface, rightMux, mdnsMode, candidatePolicy)
 	if err != nil {
 		return err
 	}
@@ -529,9 +529,9 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 	})
 
 	if err := signalNonTrickle(left, right, ctx, signalOptions{
-		RawCandidates: rawCandidates,
-		LeftIP:        leftMux.ip,
-		RightIP:       rightMux.ip,
+		CandidatePolicy: candidatePolicy,
+		LeftIP:          leftMux.ip,
+		RightIP:         rightMux.ip,
 	}); err != nil {
 		return err
 	}
@@ -552,16 +552,16 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 	}
 }
 
-func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, rawCandidates bool) error {
+func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) error {
 	mux, err := newLinkUDPMux(profile, iface, backend)
 	if err != nil {
 		return err
 	}
 	defer mux.Close()
 	fmt.Printf("answer udp mux listen=%s network=%s backend=%s bound_if=%s mdns=%s raw_candidates=%t\n",
-		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), rawCandidates)
+		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), candidatePolicy.RawHostCandidates)
 
-	pc, err := newPeer(iface, mux, mdnsMode, rawCandidates)
+	pc, err := newPeer(iface, mux, mdnsMode, candidatePolicy)
 	if err != nil {
 		return err
 	}
@@ -594,9 +594,7 @@ func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, 
 		return err
 	}
 	desc := *pc.LocalDescription()
-	if rawCandidates {
-		desc.SDP = rewriteHostCandidateAddress(desc.SDP, mux.ip)
-	}
+	desc.SDP = candidatePolicy.Publish(desc.SDP, mux.ip)
 	wire, err := encodeWireDescription(desc)
 	if err != nil {
 		return err
@@ -613,7 +611,7 @@ func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, 
 	}
 }
 
-func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, rawCandidates bool, timeout time.Duration, sshTarget, remoteBin string) error {
+func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy, timeout time.Duration, sshTarget, remoteBin string) error {
 	if sshTarget == "" {
 		return errors.New("missing -ssh for offer-ssh")
 	}
@@ -623,9 +621,9 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 	}
 	defer mux.Close()
 	fmt.Printf("offer udp mux listen=%s network=%s backend=%s bound_if=%s mdns=%s raw_candidates=%t\n",
-		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), rawCandidates)
+		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), candidatePolicy.RawHostCandidates)
 
-	pc, err := newPeer(iface, mux, mdnsMode, rawCandidates)
+	pc, err := newPeer(iface, mux, mdnsMode, candidatePolicy)
 	if err != nil {
 		return err
 	}
@@ -657,9 +655,7 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 		return err
 	}
 	desc := *pc.LocalDescription()
-	if rawCandidates {
-		desc.SDP = rewriteHostCandidateAddress(desc.SDP, mux.ip)
-	}
+	desc.SDP = candidatePolicy.Publish(desc.SDP, mux.ip)
 	wireOffer, err := encodeWireDescription(desc)
 	if err != nil {
 		return err
@@ -675,7 +671,7 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 		"-mode", "answer-stdio",
 		"-timeout", timeout.String(),
 	}
-	if rawCandidates {
+	if candidatePolicy.RawHostCandidates {
 		cmdArgs = append(cmdArgs, "-raw-candidates")
 	}
 	cmd := exec.CommandContext(ctx, "ssh", cmdArgs...)
@@ -1344,7 +1340,7 @@ func udpNetworkForPeer(peer string) (string, error) {
 	return "udp6", nil
 }
 
-func newPeer(iface linkInterface, udpMux *linkUDPMux, mdnsMode ice.MulticastDNSMode, rawCandidates bool) (*webrtc.PeerConnection, error) {
+func newPeer(iface linkInterface, udpMux *linkUDPMux, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) (*webrtc.PeerConnection, error) {
 	var se webrtc.SettingEngine
 	se.SetInterfaceFilter(func(name string) bool {
 		return name == iface.Name
@@ -1366,8 +1362,8 @@ func newPeer(iface linkInterface, udpMux *linkUDPMux, mdnsMode ice.MulticastDNSM
 	})
 	se.SetIncludeLoopbackCandidate(false)
 	se.SetICEMulticastDNSMode(mdnsMode)
-	if rawCandidates && mdnsMode == ice.MulticastDNSModeDisabled && udpMux != nil && udpMux.ip.To4() == nil && udpMux.ip.IsLinkLocalUnicast() {
-		se.SetNAT1To1IPs([]string{syntheticHostCandidateIP(udpMux.ip) + "/" + udpMux.ip.String()}, webrtc.ICECandidateTypeHost)
+	if udpMux != nil {
+		candidatePolicy.Configure(&se, mdnsMode, udpMux.ip)
 	}
 	if udpMux != nil {
 		se.SetICEUDPMux(udpMux.mux)
@@ -1376,17 +1372,10 @@ func newPeer(iface linkInterface, udpMux *linkUDPMux, mdnsMode ice.MulticastDNSM
 	return api.NewPeerConnection(webrtc.Configuration{})
 }
 
-func syntheticHostCandidateIP(ip net.IP) string {
-	if ip.To4() != nil {
-		return "198.18.0.1"
-	}
-	return "fd00::1"
-}
-
 type signalOptions struct {
-	RawCandidates bool
-	LeftIP        net.IP
-	RightIP       net.IP
+	CandidatePolicy icepolicy.Policy
+	LeftIP          net.IP
+	RightIP         net.IP
 }
 
 func signalNonTrickle(left, right *webrtc.PeerConnection, ctx context.Context, opts signalOptions) error {
@@ -1402,9 +1391,7 @@ func signalNonTrickle(left, right *webrtc.PeerConnection, ctx context.Context, o
 		return err
 	}
 	leftDesc := *left.LocalDescription()
-	if opts.RawCandidates {
-		leftDesc.SDP = rewriteHostCandidateAddress(leftDesc.SDP, opts.LeftIP)
-	}
+	leftDesc.SDP = opts.CandidatePolicy.Publish(leftDesc.SDP, opts.LeftIP)
 	if err := right.SetRemoteDescription(leftDesc); err != nil {
 		return fmt.Errorf("right set remote offer: %w", err)
 	}
@@ -1420,9 +1407,7 @@ func signalNonTrickle(left, right *webrtc.PeerConnection, ctx context.Context, o
 		return err
 	}
 	rightDesc := *right.LocalDescription()
-	if opts.RawCandidates {
-		rightDesc.SDP = rewriteHostCandidateAddress(rightDesc.SDP, opts.RightIP)
-	}
+	rightDesc.SDP = opts.CandidatePolicy.Publish(rightDesc.SDP, opts.RightIP)
 	if err := left.SetRemoteDescription(rightDesc); err != nil {
 		return fmt.Errorf("left set remote answer: %w", err)
 	}
@@ -1490,30 +1475,6 @@ func scanRemoteAnswer(r io.Reader, answerc chan<- webrtc.SessionDescription, err
 		return
 	}
 	errc <- errors.New("ssh answer ended before ANSWER line")
-}
-
-func rewriteHostCandidateAddress(sdp string, ip net.IP) string {
-	if ip == nil {
-		return sdp
-	}
-	lines := strings.Split(sdp, "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimRight(line, "\r")
-		if !strings.HasPrefix(trimmed, "a=candidate:") {
-			continue
-		}
-		fields := strings.Fields(trimmed)
-		if len(fields) < 8 || fields[7] != "host" {
-			continue
-		}
-		fields[4] = ip.String()
-		suffix := ""
-		if strings.HasSuffix(line, "\r") {
-			suffix = "\r"
-		}
-		lines[i] = strings.Join(fields, " ") + suffix
-	}
-	return strings.Join(lines, "\n")
 }
 
 func wait(ctx context.Context, ch <-chan struct{}, name string) error {
