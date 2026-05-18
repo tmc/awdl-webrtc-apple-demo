@@ -96,11 +96,21 @@ type linkWebRTCNet struct {
 type udpBackend string
 
 const (
-	udpBackendGo          udpBackend = "go"
-	udpBackendNetwork     udpBackend = "network"
-	networkConnectTimeout            = 2 * time.Second
-	networkConnectRetries            = 2
+	udpBackendGo                 udpBackend = "go"
+	udpBackendNetwork            udpBackend = "network"
+	defaultNetworkConnectTimeout            = 2 * time.Second
+	defaultNetworkConnectRetries            = 2
 )
+
+type networkConnectPolicy struct {
+	Timeout time.Duration
+	Retries int
+}
+
+var networkConnect = networkConnectPolicy{
+	Timeout: defaultNetworkConnectTimeout,
+	Retries: defaultNetworkConnectRetries,
+}
 
 func main() {
 	profileName := flag.String("profile", "awdl", "link profile: awdl, thunderbolt, or lan")
@@ -126,6 +136,8 @@ func main() {
 	perfJSON := flag.Bool("perf-json", false, "also print UDP perf result records as JSON lines")
 	requirePathInterface := flag.String("require-path-interface", "", "require UDP perf Network.framework path to include this interface")
 	forbidLoopbackPath := flag.Bool("forbid-loopback-path", false, "fail UDP perf if the Network.framework path uses loopback")
+	nwConnectTimeout := flag.Duration("nw-connect-timeout", defaultNetworkConnectTimeout, "Network.framework outbound readiness timeout before retry")
+	nwConnectRetries := flag.Int("nw-connect-retries", defaultNetworkConnectRetries, "Network.framework outbound readiness retry count")
 	uiInterval := flag.Duration("ui-interval", 3*time.Second, "SwiftUI link monitor sample interval")
 	uiCount := flag.Int("ui-count", 20, "SwiftUI link monitor datagrams per sample")
 	uiWindow := flag.Int("ui-window", 4, "SwiftUI link monitor maximum in-flight datagrams per sample")
@@ -133,6 +145,13 @@ func main() {
 	pathPolicy := udpPathPolicy{
 		RequireInterface: strings.TrimSpace(*requirePathInterface),
 		ForbidLoopback:   *forbidLoopbackPath,
+	}
+	networkConnect = networkConnectPolicy{
+		Timeout: *nwConnectTimeout,
+		Retries: *nwConnectRetries,
+	}
+	if err := validateNetworkConnectPolicy(networkConnect); err != nil {
+		fail(err)
 	}
 
 	profile, err := profileByName(*profileName)
@@ -205,6 +224,9 @@ func main() {
 		privatePolicy.InterfaceMTU,
 		privatePolicy.InterfaceMulticast,
 	)
+	if backend == udpBackendNetwork {
+		fmt.Printf("apple.network packet_connect_timeout=%s packet_connect_retries=%d\n", networkConnect.Timeout, networkConnect.Retries)
+	}
 
 	switch *mode {
 	case "check":
@@ -321,6 +343,16 @@ func parseUDPBackend(name string) (udpBackend, error) {
 	default:
 		return "", fmt.Errorf("unknown -backend %q", name)
 	}
+}
+
+func validateNetworkConnectPolicy(policy networkConnectPolicy) error {
+	if policy.Timeout <= 0 {
+		return errors.New("-nw-connect-timeout must be positive")
+	}
+	if policy.Retries < 0 {
+		return errors.New("-nw-connect-retries must be non-negative")
+	}
+	return nil
 }
 
 func parseMDNSMode(name string) (ice.MulticastDNSMode, error) {
@@ -741,6 +773,8 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 		"-mdns", mdnsModeString(mdnsMode),
 		"-mode", "answer-stdio",
 		"-timeout", timeout.String(),
+		"-nw-connect-timeout", networkConnect.Timeout.String(),
+		"-nw-connect-retries", fmt.Sprint(networkConnect.Retries),
 	}
 	if candidatePolicy.RawHostCandidates {
 		cmdArgs = append(cmdArgs, "-raw-candidates")
@@ -2221,8 +2255,8 @@ func newNetworkLinkTransportNet(profile linkProfile, iface linkInterface) (piont
 			IncludePeerToPeer:     profile.IncludePeerToPeer,
 			RequireInterface:      profile.Name == "awdl",
 			ReuseLocalAddress:     true,
-			ConnectTimeout:        networkConnectTimeout,
-			ConnectRetries:        networkConnectRetries,
+			ConnectTimeout:        networkConnect.Timeout,
+			ConnectRetries:        networkConnect.Retries,
 			QueueLabel:            "com.github.tmc.awdl-webrtc-apple-demo.network-transport",
 			Tracef:                networkTracef,
 		},
@@ -2303,8 +2337,8 @@ func newNetworkLinkPacketConn(profile linkProfile, iface linkInterface, networkN
 		IncludePeerToPeer:     profile.IncludePeerToPeer,
 		RequireInterface:      profile.Name == "awdl",
 		ReuseLocalAddress:     true,
-		ConnectTimeout:        networkConnectTimeout,
-		ConnectRetries:        networkConnectRetries,
+		ConnectTimeout:        networkConnect.Timeout,
+		ConnectRetries:        networkConnect.Retries,
 		QueueLabel:            "com.github.tmc.awdl-webrtc-apple-demo.network-packetconn",
 		Tracef:                networkTracef,
 	})

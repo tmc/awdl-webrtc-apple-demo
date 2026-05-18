@@ -15,6 +15,8 @@ streams=${STREAMS:-1}
 timeout=${TIMEOUT:-45s}
 message=${MESSAGE:-callback}
 connect_timeout=${CONNECT_TIMEOUT:-5}
+nw_connect_timeout=${NW_CONNECT_TIMEOUT:-2s}
+nw_connect_retries=${NW_CONNECT_RETRIES:-2}
 require_paths=${REQUIRE_PATHS:-0}
 lan_path_interface=${LAN_PATH_INTERFACE:-en0}
 awdl_path_interface=${AWDL_PATH_INTERFACE:-awdl0}
@@ -79,6 +81,14 @@ remote() {
 	run ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$cmd"
 }
 
+remote_network_args() {
+	printf ' -nw-connect-timeout %s -nw-connect-retries %s' "$(sq "$nw_connect_timeout")" "$(sq "$nw_connect_retries")"
+}
+
+append_local_network_args() {
+	local_args+=(-nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries")
+}
+
 path_interface_for_profile() {
 	case "$1" in
 	lan)
@@ -128,7 +138,7 @@ remote_send() {
 	if [[ -n $duration ]]; then
 		duration_arg=" -duration $(sq "$duration")"
 	fi
-	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-perf-send -peer $(sq "$peer") -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -window $(sq "$window") -streams $(sq "$streams") -perf-json$(remote_path_args "$profile") -timeout $(sq "$timeout")"
+	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-perf-send -peer $(sq "$peer") -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -window $(sq "$window") -streams $(sq "$streams") -perf-json$(remote_path_args "$profile") -timeout $(sq "$timeout")"
 }
 
 remote_latency_send() {
@@ -138,7 +148,7 @@ remote_latency_send() {
 	if [[ -n $duration ]]; then
 		duration_arg=" -duration $(sq "$duration")"
 	fi
-	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-latency-send -peer $(sq "$peer") -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -streams $(sq "$streams") -perf-json$(remote_path_args "$profile") -timeout $(sq "$timeout")"
+	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-latency-send -peer $(sq "$peer") -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -streams $(sq "$streams") -perf-json$(remote_path_args "$profile") -timeout $(sq "$timeout")"
 }
 
 local_send() {
@@ -148,6 +158,7 @@ local_send() {
 	if [[ -n $duration ]]; then
 		local_args=(-duration "$duration")
 	fi
+	append_local_network_args
 	append_local_path_args "$profile"
 	run "$local_bin" -profile "$profile" -backend network -mode udp-perf-send -peer "$peer" -count "$count" "${local_args[@]}" -warmup "$warmup" -size "$size" -trials "$trials" -window "$window" -streams "$streams" -perf-json -timeout "$timeout"
 }
@@ -159,6 +170,7 @@ local_latency_send() {
 	if [[ -n $duration ]]; then
 		local_args=(-duration "$duration")
 	fi
+	append_local_network_args
 	append_local_path_args "$profile"
 	run "$local_bin" -profile "$profile" -backend network -mode udp-latency-send -peer "$peer" -count "$count" "${local_args[@]}" -warmup "$warmup" -size "$size" -trials "$trials" -streams "$streams" -perf-json -timeout "$timeout"
 }
@@ -169,6 +181,7 @@ run_local_listener_then_remote_sender() {
 	if [[ -n $duration ]]; then
 		args=(-duration "$duration")
 	fi
+	args+=(-nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries")
 	local log
 	log=$(mktemp)
 	printf '## %s remote-to-local UDP perf\n' "$profile"
@@ -195,6 +208,7 @@ run_local_listener_then_remote_latency() {
 	if [[ -n $duration ]]; then
 		args=(-duration "$duration")
 	fi
+	args+=(-nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries")
 	local log
 	log=$(mktemp)
 	printf '## %s remote-to-local UDP latency\n' "$profile"
@@ -224,7 +238,7 @@ run_remote_listener_then_local_sender() {
 	local log
 	log=$(mktemp)
 	printf '## %s local-to-remote UDP perf\n' "$profile"
-	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
+	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
 	local listener_pid=$!
 	local peer
 	if ! peer=$(wait_for_peer "$log" "remote $profile"); then
@@ -250,7 +264,7 @@ run_remote_listener_then_local_latency() {
 	local log
 	log=$(mktemp)
 	printf '## %s local-to-remote UDP latency\n' "$profile"
-	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
+	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
 	local listener_pid=$!
 	local peer
 	if ! peer=$(wait_for_peer "$log" "remote latency $profile"); then
@@ -272,7 +286,7 @@ run_local_callback_then_remote_request() {
 	local log
 	log=$(mktemp)
 	printf '## %s callback remote-to-local request\n' "$profile"
-	"$local_bin" -profile "$profile" -backend network -mode udp-callback-listen -timeout "$timeout" >"$log" 2>&1 &
+	"$local_bin" -profile "$profile" -backend network -nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries" -mode udp-callback-listen -timeout "$timeout" >"$log" 2>&1 &
 	local listener_pid=$!
 	local peer
 	if ! peer=$(wait_for_callback_peer "$log" "local $profile"); then
@@ -282,7 +296,7 @@ run_local_callback_then_remote_request() {
 		return 1
 	fi
 	local rc=0
-	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-callback-request -peer $(sq "$peer") -message $(sq "$message") -timeout $(sq "$timeout")" || rc=$?
+	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-callback-request -peer $(sq "$peer") -message $(sq "$message") -timeout $(sq "$timeout")" || rc=$?
 	wait "$listener_pid" || rc=$?
 	cat "$log"
 	rm -f "$log"
@@ -294,7 +308,7 @@ run_remote_callback_then_local_request() {
 	local log
 	log=$(mktemp)
 	printf '## %s callback local-to-remote request\n' "$profile"
-	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-callback-listen -timeout $(sq "$timeout")" >"$log" 2>&1 &
+	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-callback-listen -timeout $(sq "$timeout")" >"$log" 2>&1 &
 	local listener_pid=$!
 	local peer
 	if ! peer=$(wait_for_callback_peer "$log" "remote $profile"); then
@@ -304,7 +318,7 @@ run_remote_callback_then_local_request() {
 		return 1
 	fi
 	local rc=0
-	run "$local_bin" -profile "$profile" -backend network -mode udp-callback-request -peer "$peer" -message "$message" -timeout "$timeout" || rc=$?
+	run "$local_bin" -profile "$profile" -backend network -nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries" -mode udp-callback-request -peer "$peer" -message "$message" -timeout "$timeout" || rc=$?
 	wait "$listener_pid" || rc=$?
 	cat "$log"
 	rm -f "$log"
@@ -316,11 +330,11 @@ run go build -o "$local_bin" .
 
 printf '## install remote binary\n'
 run scp -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$local_bin" "$ssh_target:$remote_bin"
-remote "chmod +x $(sq "$remote_bin") && $(sq "$remote_bin") -mode check -profile lan -backend network -timeout 3s >/dev/null"
+remote "chmod +x $(sq "$remote_bin") && $(sq "$remote_bin") -mode check -profile lan -backend network$(remote_network_args) -timeout 3s >/dev/null"
 
 for profile in $profiles; do
 	printf '## %s Pion transport.Net WebRTC\n' "$profile"
-	run "$local_bin" -profile "$profile" -backend network -pion-net -mdns disabled -raw-candidates -mode offer-ssh -ssh "$ssh_target" -remote-bin "$remote_bin" -timeout "$timeout"
+	run "$local_bin" -profile "$profile" -backend network -nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries" -pion-net -mdns disabled -raw-candidates -mode offer-ssh -ssh "$ssh_target" -remote-bin "$remote_bin" -timeout "$timeout"
 
 	run_local_listener_then_remote_sender "$profile"
 	run_remote_listener_then_local_sender "$profile"

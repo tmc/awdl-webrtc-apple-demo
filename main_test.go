@@ -17,6 +17,42 @@ import (
 	"github.com/tmc/apple/x/network/nwpacket"
 )
 
+func TestValidateNetworkConnectPolicy(t *testing.T) {
+	tests := []struct {
+		name    string
+		policy  networkConnectPolicy
+		wantErr bool
+	}{
+		{
+			name:   "defaults",
+			policy: networkConnectPolicy{Timeout: defaultNetworkConnectTimeout, Retries: defaultNetworkConnectRetries},
+		},
+		{
+			name:    "zero timeout",
+			policy:  networkConnectPolicy{Timeout: 0, Retries: 0},
+			wantErr: true,
+		},
+		{
+			name:    "negative timeout",
+			policy:  networkConnectPolicy{Timeout: -time.Nanosecond, Retries: 0},
+			wantErr: true,
+		},
+		{
+			name:    "negative retries",
+			policy:  networkConnectPolicy{Timeout: time.Second, Retries: -1},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateNetworkConnectPolicy(tt.policy)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateNetworkConnectPolicy err = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestShouldBindUDPToInterface(t *testing.T) {
 	tests := []struct {
 		name    string
