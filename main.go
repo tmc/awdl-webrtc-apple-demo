@@ -117,6 +117,7 @@ func main() {
 	size := flag.Int("size", 1200, "UDP perf payload size in bytes")
 	warmup := flag.Int("warmup", 5, "UDP perf warm-up datagrams to omit")
 	trials := flag.Int("trials", 1, "UDP perf trial count")
+	perfJSON := flag.Bool("perf-json", false, "also print UDP perf result records as JSON lines")
 	flag.Parse()
 
 	profile, err := profileByName(*profileName)
@@ -223,15 +224,15 @@ func main() {
 		})
 	case "udp-perf":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return udpPerf(ctx, profile, iface, backend, *count, *size, *warmup, *trials)
+			return udpPerf(ctx, profile, iface, backend, *count, *size, *warmup, *trials, *perfJSON)
 		})
 	case "udp-perf-listen":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return udpPerfListen(ctx, profile, iface, backend, *count+*warmup)
+			return udpPerfListen(ctx, profile, iface, backend, *count+*warmup, *perfJSON)
 		})
 	case "udp-perf-send":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return udpPerfSend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials)
+			return udpPerfSend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials, *perfJSON)
 		})
 	default:
 		fail(fmt.Errorf("unknown -mode %q", *mode))
@@ -877,7 +878,28 @@ type udpPerfResult struct {
 	RTT     []time.Duration
 }
 
-func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup, trials int) error {
+type udpPerfRecord struct {
+	Kind          string  `json:"kind"`
+	Trial         int     `json:"trial,omitempty"`
+	Trials        int     `json:"trials,omitempty"`
+	Count         int     `json:"count,omitempty"`
+	Size          int     `json:"size,omitempty"`
+	Warmup        int     `json:"warmup,omitempty"`
+	Datagrams     int     `json:"datagrams"`
+	Lost          int     `json:"lost"`
+	LossPercent   float64 `json:"loss_percent"`
+	TransferBytes int64   `json:"transfer_bytes"`
+	BitrateBPS    float64 `json:"bitrate_bps"`
+	ElapsedNS     int64   `json:"elapsed_ns"`
+	RTTMinNS      int64   `json:"rtt_min_ns"`
+	RTTAvgNS      int64   `json:"rtt_avg_ns"`
+	RTTP50NS      int64   `json:"rtt_p50_ns"`
+	RTTP95NS      int64   `json:"rtt_p95_ns"`
+	RTTMaxNS      int64   `json:"rtt_max_ns"`
+	Expected      int64   `json:"expected,omitempty"`
+}
+
+func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup, trials int, jsonOut bool) error {
 	if trials <= 0 {
 		return errors.New("udp perf -trials must be positive")
 	}
@@ -910,6 +932,9 @@ func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, back
 			return err
 		}
 		printUDPPerf(result)
+		if jsonOut {
+			printJSON(udpPerfRecordForTrial(result, trial, trials))
+		}
 	}
 	if err := <-errc; err != nil {
 		return err
@@ -917,7 +942,7 @@ func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, back
 	return nil
 }
 
-func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, expected int) error {
+func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, expected int, jsonOut bool) error {
 	link, err := newLinkPacketConn(profile, iface, backend, "")
 	if err != nil {
 		return err
@@ -937,6 +962,9 @@ func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface
 			if ctx.Err() != nil || isTimeout(err) {
 				elapsed := time.Since(start)
 				printUDPPerfListen(packets, bytes, elapsed, int64(expected))
+				if jsonOut {
+					printJSON(udpPerfListenRecord(packets, bytes, elapsed, int64(expected)))
+				}
 				return nil
 			}
 			return fmt.Errorf("udp perf listen read: %w", err)
@@ -948,13 +976,17 @@ func udpPerfListen(ctx context.Context, profile linkProfile, iface linkInterface
 			return fmt.Errorf("udp perf listen write %s: %w", addr, err)
 		}
 		if expected > 0 && packets >= int64(expected) {
-			printUDPPerfListen(packets, bytes, time.Since(start), int64(expected))
+			elapsed := time.Since(start)
+			printUDPPerfListen(packets, bytes, elapsed, int64(expected))
+			if jsonOut {
+				printJSON(udpPerfListenRecord(packets, bytes, elapsed, int64(expected)))
+			}
 			return nil
 		}
 	}
 }
 
-func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup, trials int) error {
+func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup, trials int, jsonOut bool) error {
 	if peer == "" {
 		return errors.New("missing -peer for udp-perf-send")
 	}
@@ -986,6 +1018,9 @@ func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, 
 			return err
 		}
 		printUDPPerf(result)
+		if jsonOut {
+			printJSON(udpPerfRecordForTrial(result, trial, trials))
+		}
 	}
 	return nil
 }
@@ -1072,20 +1107,13 @@ func fillPayload(buf []byte, seed byte) {
 }
 
 func printUDPPerf(result udpPerfResult) {
-	rtt := append([]time.Duration(nil), result.RTT...)
-	sort.Slice(rtt, func(i, j int) bool { return rtt[i] < rtt[j] })
-	total := time.Duration(0)
-	for _, d := range rtt {
-		total += d
-	}
-	success := len(rtt)
-	bytes := int64(success * result.Size * 2)
+	record := udpPerfRecordForTrial(result, 0, 0)
 	fmt.Println("[ ID] Interval           Transfer     Bitrate         Datagrams  Lost  Loss    Omit  RTT min/avg/p50/p95/max")
-	if success == 0 {
+	if record.Datagrams == 0 {
 		fmt.Printf("[  5] 0.00-%-7.2f sec  %10s  %13s  %9d  %4d  %6s  %4d  -/-/-/-/-\n",
 			result.Elapsed.Seconds(),
-			formatBytes(bytes),
-			formatBitrate(bytes, result.Elapsed),
+			formatBytes(record.TransferBytes),
+			formatBitrate(record.TransferBytes, result.Elapsed),
 			result.Count,
 			result.Lost,
 			formatLoss(result.Lost, result.Count),
@@ -1095,17 +1123,17 @@ func printUDPPerf(result udpPerfResult) {
 	}
 	fmt.Printf("[  5] 0.00-%-7.2f sec  %10s  %13s  %9d  %4d  %6s  %4d  %s/%s/%s/%s/%s\n",
 		result.Elapsed.Seconds(),
-		formatBytes(bytes),
-		formatBitrate(bytes, result.Elapsed),
+		formatBytes(record.TransferBytes),
+		formatBitrate(record.TransferBytes, result.Elapsed),
 		result.Count,
 		result.Lost,
 		formatLoss(result.Lost, result.Count),
 		result.Warmup,
-		formatDuration(rtt[0]),
-		formatDuration(total/time.Duration(len(rtt))),
-		formatDuration(percentileDuration(rtt, 50)),
-		formatDuration(percentileDuration(rtt, 95)),
-		formatDuration(rtt[len(rtt)-1]),
+		formatDuration(time.Duration(record.RTTMinNS)),
+		formatDuration(time.Duration(record.RTTAvgNS)),
+		formatDuration(time.Duration(record.RTTP50NS)),
+		formatDuration(time.Duration(record.RTTP95NS)),
+		formatDuration(time.Duration(record.RTTMaxNS)),
 	)
 }
 
@@ -1117,6 +1145,66 @@ func printUDPPerfListen(packets, bytes int64, elapsed time.Duration, expected in
 	fmt.Println("[ ID] Interval           Transfer     Bitrate         Datagrams  Lost  Loss")
 	fmt.Printf("[  5] 0.00-%-7.2f sec  %10s  %13s  %9d  %4d  %6s\n",
 		elapsed.Seconds(), formatBytes(bytes), formatBitrate(bytes, elapsed), packets, lost, formatLoss64(lost, expected))
+}
+
+func udpPerfRecordForTrial(result udpPerfResult, trial, trials int) udpPerfRecord {
+	rtt := append([]time.Duration(nil), result.RTT...)
+	sort.Slice(rtt, func(i, j int) bool { return rtt[i] < rtt[j] })
+	success := len(rtt)
+	bytes := int64(success * result.Size * 2)
+	record := udpPerfRecord{
+		Kind:          "udp_perf",
+		Trial:         trial,
+		Trials:        trials,
+		Count:         result.Count,
+		Size:          result.Size,
+		Warmup:        result.Warmup,
+		Datagrams:     success,
+		Lost:          result.Lost,
+		LossPercent:   lossPercent(int64(result.Lost), int64(result.Count)),
+		TransferBytes: bytes,
+		BitrateBPS:    bitrateBPS(bytes, result.Elapsed),
+		ElapsedNS:     result.Elapsed.Nanoseconds(),
+	}
+	if success == 0 {
+		return record
+	}
+	total := time.Duration(0)
+	for _, d := range rtt {
+		total += d
+	}
+	record.RTTMinNS = rtt[0].Nanoseconds()
+	record.RTTAvgNS = (total / time.Duration(success)).Nanoseconds()
+	record.RTTP50NS = percentileDuration(rtt, 50).Nanoseconds()
+	record.RTTP95NS = percentileDuration(rtt, 95).Nanoseconds()
+	record.RTTMaxNS = rtt[success-1].Nanoseconds()
+	return record
+}
+
+func udpPerfListenRecord(packets, bytes int64, elapsed time.Duration, expected int64) udpPerfRecord {
+	lost := int64(0)
+	if expected > packets {
+		lost = expected - packets
+	}
+	return udpPerfRecord{
+		Kind:          "udp_perf_listen",
+		Datagrams:     int(packets),
+		Expected:      expected,
+		Lost:          int(lost),
+		LossPercent:   lossPercent(lost, expected),
+		TransferBytes: bytes,
+		BitrateBPS:    bitrateBPS(bytes, elapsed),
+		ElapsedNS:     elapsed.Nanoseconds(),
+	}
+}
+
+func printJSON(v any) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		fmt.Printf("json error: %v\n", err)
+		return
+	}
+	fmt.Println(string(data))
 }
 
 func percentileDuration(values []time.Duration, percentile int) time.Duration {
@@ -1156,10 +1244,7 @@ func formatBytes(bytes int64) string {
 }
 
 func formatBitrate(bytes int64, elapsed time.Duration) string {
-	if elapsed <= 0 {
-		return "0 bits/sec"
-	}
-	bitsPerSecond := float64(bytes*8) / elapsed.Seconds()
+	bitsPerSecond := bitrateBPS(bytes, elapsed)
 	for _, suffix := range []string{"bits/sec", "Kbits/sec", "Mbits/sec", "Gbits/sec"} {
 		if bitsPerSecond < 1000 || suffix == "Gbits/sec" {
 			return fmt.Sprintf("%.2f %s", bitsPerSecond, suffix)
@@ -1167,6 +1252,13 @@ func formatBitrate(bytes int64, elapsed time.Duration) string {
 		bitsPerSecond /= 1000
 	}
 	return "0 bits/sec"
+}
+
+func bitrateBPS(bytes int64, elapsed time.Duration) float64 {
+	if elapsed <= 0 {
+		return 0
+	}
+	return float64(bytes*8) / elapsed.Seconds()
 }
 
 func formatLoss(lost, count int) string {
@@ -1178,6 +1270,13 @@ func formatLoss64(lost, count int64) string {
 		return "-"
 	}
 	return fmt.Sprintf("%.2f%%", float64(lost)*100/float64(count))
+}
+
+func lossPercent(lost, count int64) float64 {
+	if count <= 0 {
+		return 0
+	}
+	return float64(lost) * 100 / float64(count)
 }
 
 func formatDuration(d time.Duration) string {
