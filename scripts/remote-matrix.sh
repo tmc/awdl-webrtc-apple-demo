@@ -6,6 +6,7 @@ local_bin=${LOCAL_BIN:-/tmp/awdl-webrtc-apple-demo-bin}
 remote_bin=${REMOTE_BIN:-/tmp/awdl-webrtc-apple-demo-bin}
 profiles=${PROFILES:-lan thunderbolt awdl}
 count=${COUNT:-20}
+duration=${DURATION:-}
 warmup=${WARMUP:-0}
 size=${SIZE:-1200}
 trials=${TRIALS:-3}
@@ -54,18 +55,29 @@ remote() {
 remote_send() {
 	local profile=$1
 	local peer=$2
-	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-perf-send -peer $(sq "$peer") -count $(sq "$count") -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -window $(sq "$window") -perf-json -timeout $(sq "$timeout")"
+	local duration_arg=
+	if [[ -n $duration ]]; then
+		duration_arg=" -duration $(sq "$duration")"
+	fi
+	remote "$(sq "$remote_bin") -profile $(sq "$profile") -backend network -mode udp-perf-send -peer $(sq "$peer") -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -size $(sq "$size") -trials $(sq "$trials") -window $(sq "$window") -perf-json -timeout $(sq "$timeout")"
 }
 
 local_send() {
 	local profile=$1
 	local peer=$2
-	run "$local_bin" -profile "$profile" -backend network -mode udp-perf-send -peer "$peer" -count "$count" -warmup "$warmup" -size "$size" -trials "$trials" -window "$window" -perf-json -timeout "$timeout"
+	local args=()
+	if [[ -n $duration ]]; then
+		args=(-duration "$duration")
+	fi
+	run "$local_bin" -profile "$profile" -backend network -mode udp-perf-send -peer "$peer" -count "$count" "${args[@]}" -warmup "$warmup" -size "$size" -trials "$trials" -window "$window" -perf-json -timeout "$timeout"
 }
 
 run_local_listener_then_remote_sender() {
 	local profile=$1
-	local expected=$((count + warmup))
+	local expected=$(((count + warmup) * trials))
+	if [[ -n $duration ]]; then
+		expected=0
+	fi
 	local log
 	log=$(mktemp)
 	printf '## %s remote-to-local UDP perf\n' "$profile"
@@ -88,7 +100,10 @@ run_local_listener_then_remote_sender() {
 
 run_remote_listener_then_local_sender() {
 	local profile=$1
-	local expected=$((count + warmup))
+	local expected=$(((count + warmup) * trials))
+	if [[ -n $duration ]]; then
+		expected=0
+	fi
 	local log
 	log=$(mktemp)
 	printf '## %s local-to-remote UDP perf\n' "$profile"

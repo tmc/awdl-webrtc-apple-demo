@@ -515,7 +515,7 @@ func (a *linkHealthAgent) sample(ctx context.Context, endpoint *linkHealthEndpoi
 	timeout := maxDuration(2*a.cfg.PacketTimeout*time.Duration(a.cfg.Count/a.cfg.Window+1), a.cfg.Interval)
 	sampleCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	result, err := runUDPEchoPerf(sampleCtx, link.conn, addr, a.cfg.Count, a.cfg.Size, 0, a.cfg.Window, a.cfg.PacketTimeout)
+	result, err := runUDPEchoPerf(sampleCtx, link.conn, addr, a.cfg.Count, a.cfg.Size, 0, a.cfg.Window, a.cfg.PacketTimeout, 0)
 	if err != nil {
 		sample.Error = err.Error()
 		return sample

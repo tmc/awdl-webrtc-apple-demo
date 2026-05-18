@@ -158,12 +158,13 @@ func TestDecodeWireSignalAcceptsLegacyDescription(t *testing.T) {
 
 func TestUDPPerfRecordForTrial(t *testing.T) {
 	result := udpPerfResult{
-		Count:   3,
-		Size:    100,
-		Warmup:  1,
-		Window:  2,
-		Lost:    1,
-		Elapsed: 10 * time.Millisecond,
+		Count:    3,
+		Duration: 5 * time.Second,
+		Size:     100,
+		Warmup:   1,
+		Window:   2,
+		Lost:     1,
+		Elapsed:  10 * time.Millisecond,
 		RTT: []time.Duration{
 			3 * time.Millisecond,
 			1 * time.Millisecond,
@@ -178,6 +179,9 @@ func TestUDPPerfRecordForTrial(t *testing.T) {
 	}
 	if record.Window != 2 {
 		t.Fatalf("record window = %d, want 2", record.Window)
+	}
+	if record.DurationNS != int64(5*time.Second) {
+		t.Fatalf("record duration = %d, want %d", record.DurationNS, int64(5*time.Second))
 	}
 	if record.LossPercent != 100.0/3.0 {
 		t.Fatalf("loss percent = %v", record.LossPercent)
@@ -258,7 +262,7 @@ func TestUDPPerfListenRecord(t *testing.T) {
 
 func TestRunUDPEchoPerfCountsReadTimeoutsAsLoss(t *testing.T) {
 	conn := &timeoutPacketConn{}
-	result, err := runUDPEchoPerf(context.Background(), conn, &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9}, 3, 16, 0, 1, time.Millisecond)
+	result, err := runUDPEchoPerf(context.Background(), conn, &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9}, 3, 16, 0, 1, time.Millisecond, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +276,7 @@ func TestRunUDPEchoPerfCountsReadTimeoutsAsLoss(t *testing.T) {
 
 func TestRunUDPEchoPerfWindowPipelines(t *testing.T) {
 	conn := &echoPacketConn{addr: &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9}}
-	result, err := runUDPEchoPerf(context.Background(), conn, conn.addr, 5, 16, 0, 3, time.Second)
+	result, err := runUDPEchoPerf(context.Background(), conn, conn.addr, 5, 16, 0, 3, time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,6 +288,23 @@ func TestRunUDPEchoPerfWindowPipelines(t *testing.T) {
 	}
 	if conn.maxQueued != 3 {
 		t.Fatalf("max queued = %d, want 3", conn.maxQueued)
+	}
+}
+
+func TestRunUDPEchoPerfDuration(t *testing.T) {
+	conn := &echoPacketConn{addr: &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9}}
+	result, err := runUDPEchoPerf(context.Background(), conn, conn.addr, 0, 16, 0, 4, time.Second, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Duration != time.Millisecond {
+		t.Fatalf("duration = %s, want 1ms", result.Duration)
+	}
+	if result.Count == 0 || len(result.RTT) != result.Count || result.Lost != 0 {
+		t.Fatalf("result count=%d rtt=%d lost=%d, want successful duration run", result.Count, len(result.RTT), result.Lost)
+	}
+	if conn.maxQueued != 4 {
+		t.Fatalf("max queued = %d, want 4", conn.maxQueued)
 	}
 }
 
