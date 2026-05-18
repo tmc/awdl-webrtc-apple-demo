@@ -83,8 +83,9 @@ link-local host candidates for privacy.
 
 For explicit two-process signaling, `-mdns disabled -raw-candidates` enables
 the demo's AWDL host-candidate policy. It uses a synthetic non-link-local host
-candidate inside Pion and publishes the selected interface IP during SDP
-exchange. This keeps the demo no-fork while making AWDL link-local ICE testable.
+candidate inside Pion, strips candidates from the SDP, and publishes the
+selected interface IP as explicit `ICECandidateInit` records. This keeps the
+demo no-fork while making AWDL link-local ICE testable without SDP rewriting.
 
 The `pair` mode creates two local PeerConnections and exchanges a datachannel
 payload over the constrained interface. On this host, Thunderbolt Bridge pairing
@@ -92,8 +93,8 @@ passes. AWDL same-host pairing is not useful because AWDL traffic is peer-link
 traffic; use `offer-ssh` against another Apple host.
 
 The `offer-ssh` mode runs the local side, starts `answer-stdio` on a peer over
-SSH, exchanges SDP over stdin/stdout, and waits for a WebRTC datachannel
-`ping`/`pong`:
+SSH, exchanges SDP plus optional explicit ICE candidates over stdin/stdout, and
+waits for a WebRTC datachannel `ping`/`pong`:
 
 ```sh
 go run . -profile thunderbolt -backend network -mode offer-ssh \
