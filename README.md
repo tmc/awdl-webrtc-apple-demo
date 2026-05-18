@@ -10,9 +10,9 @@ The reusable Network.framework surfaces are:
 - `github.com/tmc/apple/network/nwpacket`: a Network.framework
   `net.PacketConn`, consumed from the sibling `tmc/apple` checkout through the
   temporary `replace github.com/tmc/apple => ../apple`.
-- `github.com/tmc/awdl-webrtc-apple-demo/nwtransport`: a small Pion
-  `transport.Net` adapter that routes UDP listeners and concrete UDP dials
-  through `nwpacket`.
+- `github.com/tmc/apple-pion/nwtransport`: a small Pion `transport.Net`
+  adapter, consumed from the sibling `tmc/apple-pion` checkout through the
+  temporary `replace github.com/tmc/apple-pion => ../apple-pion`.
 
 It has three profiles:
 
