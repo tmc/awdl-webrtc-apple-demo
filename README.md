@@ -5,6 +5,9 @@ local links using `github.com/tmc/apple` plus Pion WebRTC.
 
 See [RESULTS.md](RESULTS.md) for the current answer/output table.
 
+The reusable Network.framework packet surface is package
+`github.com/tmc/awdl-webrtc-apple-demo/nwpacket`.
+
 It has three profiles:
 
 - `awdl`: uses `awdl0`, sets public Network.framework UDP parameters to include
@@ -57,10 +60,10 @@ enables mDNS host candidates, and verifies candidates are either from the
 selected IP set or mDNS publication. mDNS is intentional: Pion filters raw IPv6
 link-local host candidates for privacy.
 
-For explicit two-process signaling, `-mdns disabled -raw-candidates` publishes
-AWDL link-local candidates by using a synthetic non-link-local host candidate
-inside Pion and rewriting the exchanged SDP back to the selected interface IP.
-This keeps the demo no-fork while making AWDL link-local ICE testable.
+For explicit two-process signaling, `-mdns disabled -raw-candidates` enables
+the demo's AWDL host-candidate policy. It uses a synthetic non-link-local host
+candidate inside Pion and publishes the selected interface IP during SDP
+exchange. This keeps the demo no-fork while making AWDL link-local ICE testable.
 
 The `pair` mode creates two local PeerConnections and exchanges a datachannel
 payload over the constrained interface. On this host, Thunderbolt Bridge pairing
@@ -88,10 +91,10 @@ addresses on `awdl0` after the AWDL gather path has activated the interface.
 If a cold `udp` run times out, run `gather` first or use the two-host form.
 
 The `udp-perf` mode runs a small iperf-like request/echo benchmark over the
-same sockets and prints transfer, bitrate, datagram count, and RTT summary
-columns. The `-warmup` packets are omitted from the summary, which is useful
-for AWDL activation outliers. This is a smoke benchmark, not a replacement for
-`iperf3`.
+same sockets and prints transfer, bitrate, datagram count, loss, and RTT
+summary columns. The `-warmup` packets are omitted from the summary, and
+`-trials` repeats the same run on one connection. This is a smoke benchmark,
+not a replacement for `iperf3`.
 
 For a two-host AWDL UDP proof, run the listener on one Mac:
 

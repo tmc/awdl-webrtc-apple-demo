@@ -13,11 +13,13 @@ Scope terms:
 
 | Question / Area | Status | Answer | Evidence | Caveat / Next |
 | --- | --- | --- | --- | --- |
-| Repo location | PASS | The demo is in `~/go/src/github.com/tmc/awdl-webrtc-apple-demo`. | Code layers are `564d648` and `6ca9ff3`; this commit is the docs/results layer. | Uses released `github.com/tmc/apple v0.6.3`. |
+| Repo location | PASS | The demo is in `~/go/src/github.com/tmc/awdl-webrtc-apple-demo`. | Productization code through `9d3c4bb`; this commit is the docs/audit layer. | Uses released `github.com/tmc/apple v0.6.3`. |
 | Build | PASS | The module builds. | `go test ./...` -> `[no test files]`. | Darwin-only demo. |
 | WebRTC support | PASS | Yes, via Pion WebRTC with constrained ICE. | Modes: `check`, `gather`, `pair`, `answer-stdio`, `offer-ssh`. | `offer-ssh` is explicit demo signaling, not a general signaling service. |
-| Pion changes | PASS | No Pion fork or patch was needed. | Uses `SettingEngine` filters, mDNS mode, `SetICEUDPMux`, and explicit SDP exchange. | AWDL WebRTC needs `-mdns disabled -raw-candidates` to avoid mDNS/link-local filtering. |
+| Pion changes | PASS | No Pion fork or patch was needed. | Uses `SettingEngine` filters, mDNS mode, `SetICEUDPMux`, explicit SDP exchange, and `internal/icepolicy`. | AWDL WebRTC still needs `-mdns disabled -raw-candidates` to avoid mDNS/link-local filtering. |
 | Pluggable backend shape | PASS | The CLI has `-backend go\|network`; both satisfy `net.PacketConn` and feed Pion through `SetICEUDPMux`. | `go test ./...`; `-backend network` gather, UDP perf, and remote WebRTC pass. | Full Pion `transport.Net` replacement is still future work. |
+| Reusable packet package | PASS | The Network.framework PacketConn is split into importable package `github.com/tmc/awdl-webrtc-apple-demo/nwpacket`. | Package docs, example, and tests under `nwpacket/`; `go test ./...` passes. | Still in this module, not promoted to `tmc/apple` or a standalone module. |
+| Explicit ICE policy | PARTIAL | AWDL host-candidate handling is factored into `internal/icepolicy`. | Tests cover host-candidate publishing behavior; AWDL raw-candidate gather passes. | The current policy still publishes rewritten SDP; a true Pion-native solution would avoid SDP mutation. |
 | Apple public policy | PASS | Public Network.framework parameters work for all profiles. | AWDL: `include_peer_to_peer=true`, Wi-Fi. Thunderbolt: wired. LAN: Wi-Fi. | The clear UDP backend applies these through `NWParametersCreate` plus `NWUDPCreateOptions`. |
 | Apple private policy | PASS | Private knobs are reachable without importing the broken local generated private package. | Raw Objective-C probes report `required_interface`, `use_awdl`, `use_p2p`, `allow_socket_access`, `reuse_local_address`, `prohibit_fallback`. | Exact `NWInterface.cInterface` is enabled for AWDL only; Thunderbolt uses the link-local bridge address. |
 | Network.framework clear UDP | PASS | The backend must use `NWParametersCreate` plus `NWUDPCreateOptions`; `NWParametersCreateSecureUDP(nil, nil)` attempted DTLS and failed. | Trace showed `NWErrorDomainTLS` before the clear UDP change; clear UDP then reached `NWConnectionStateReady`. | This is documented in code, not a Pion change. |
@@ -35,7 +37,7 @@ Scope terms:
 | Thunderbolt Network.framework UDP | PASS | Network.framework can send raw UDP perf traffic over Thunderbolt Bridge. | 50 datagrams, `488.84 Kbits/sec`, avg RTT `39.276ms`; trace path `bridge0/NWInterfaceTypeWired`. | Required interface type had to be omitted; link-local bridge address selected the path. |
 | LAN remote UDP perf | PARTIAL | LAN UDP is reachable, but sustained runs are unstable here. | 20 datagrams completed at `755.17 Kbits/sec`, avg RTT `25.424ms`; 50/100/1000-datagram attempts timed out. | Likely host firewall or LAN filtering/asymmetry; SSH/TCP works. |
 | LAN Network.framework UDP | PASS | Network.framework can send raw UDP perf traffic over LAN. | 20 datagrams, `753.72 Kbits/sec`, avg RTT `25.473ms`; trace path `en0/NWInterfaceTypeWifi`. | LAN remains slower/less stable than Thunderbolt in this environment. |
-| UDP perf output | PASS | The demo prints iperf-like UDP summaries. | Columns: interval, transfer, bitrate, datagrams, omit, RTT min/avg/p50/p95/max. | Smoke benchmark, not an `iperf3` replacement. |
+| UDP perf output | PASS | The demo prints iperf-like UDP summaries with loss columns and repeated trials. | Columns: interval, transfer, bitrate, datagrams, lost, loss, omit, RTT min/avg/p50/p95/max; `-trials` repeats runs. | Smoke benchmark, not an `iperf3` replacement. |
 | AWDL local perf | PASS | Local AWDL sample produced `221.70 Mbits/sec`. | 1000 datagrams, 1200-byte payload, 5 warmup packets omitted. | Same-host sample after AWDL activation. |
 | Thunderbolt local perf | PASS | Local Thunderbolt sample produced `283.48 Mbits/sec`. | 1000 datagrams, 1200-byte payload, 5 warmup packets omitted. | Same-host sample, not peer-to-peer cable speed. |
 | Two-host UDP proof | READY | Listener/sender modes are implemented. | `udp-listen`, `udp-send`, `udp-perf-listen`, `udp-perf-send`. | Use printed scoped peer address on the sender. |
@@ -52,6 +54,7 @@ Scope terms:
 | Goal | Command | Observed Result |
 | --- | --- | --- |
 | Build gate | `go test ./...` | `? github.com/tmc/awdl-webrtc-apple-demo [no test files]` |
+| Productized packages | `go test ./nwpacket ./internal/icepolicy` | `nwpacket` and `internal/icepolicy` tests pass. |
 | Network backend build pin | `go list -m github.com/tmc/apple` | `github.com/tmc/apple v0.6.3`; no local replace. |
 | Network LAN gather | `go run . -profile lan -backend network -mode gather -timeout 8s` | Two mDNS host candidates from an `en0` Network.framework UDP mux. |
 | Network Thunderbolt gather | `go run . -profile thunderbolt -backend network -mode gather -timeout 8s` | Two mDNS host candidates from a `bridge0` Network.framework UDP mux. |
@@ -66,6 +69,7 @@ Scope terms:
 | Network Thunderbolt remote perf sender | Remote: `ssh tmc2@10.0.18.249 '/tmp/awdl-webrtc-apple-demo-bin -profile thunderbolt -backend network -mode udp-perf-send -peer 169.254.7.165:62622 -count 50 -warmup 0 -size 1200 -timeout 30s'` | `117.19 KBytes`, `488.84 Kbits/sec`, avg RTT `39.276ms`. |
 | Network AWDL remote perf listener | Local: `/tmp/awdl-webrtc-apple-demo-bin -profile awdl -backend network -mode udp-perf-listen -count 20 -warmup 0 -timeout 35s` | Listener received 20 datagrams. |
 | Network AWDL remote perf sender | Remote: `ssh tmc2@10.0.18.249 '/tmp/awdl-webrtc-apple-demo-bin -profile awdl -backend network -mode udp-perf-send -peer "[fe80::bcb7:e5ff:fe2d:13b4%awdl0]:57250" -count 20 -warmup 0 -size 1200 -timeout 35s'` | `46.88 KBytes`, `951.16 Kbits/sec`, avg RTT `20.185ms`. |
+| Network repeated perf smoke | `go run . -profile lan -backend network -mode udp-perf -count 2 -warmup 0 -trials 2 -timeout 15s` | Two trial summaries printed with `Lost` and `Loss` columns. |
 | AWDL policy check | `go run . -profile awdl -mode check` | Prints AWDL profile, public Wi-Fi peer-to-peer policy, and private `use_awdl=true use_p2p=true`. |
 | AWDL WebRTC gather | `go run . -profile awdl -mode gather -timeout 10s` | Two mDNS host candidates from an `awdl0` UDP mux. |
 | AWDL UDP echo | `go run . -profile awdl -mode udp -timeout 10s` | Echoed `ping` over scoped IPv6 on `awdl0`. |
@@ -83,7 +87,7 @@ Scope terms:
 | Two-host AWDL echo listener | `go run . -profile awdl -mode udp-listen -timeout 60s` | Prints a scoped listener address for the peer. |
 | Two-host AWDL echo sender | `go run . -profile awdl -mode udp-send -peer '[fe80::peer%awdl0]:12345' -timeout 10s` | Sends one payload and waits for echo. |
 | Two-host AWDL perf listener | `go run . -profile awdl -mode udp-perf-listen -timeout 60s` | Echoes perf datagrams and prints ingress summary when done. |
-| Two-host AWDL perf sender | `go run . -profile awdl -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -count 1000 -size 1200 -warmup 5 -timeout 20s` | Prints iperf-like transfer, bitrate, datagrams, omit, and RTT summary. |
+| Two-host AWDL perf sender | `go run . -profile awdl -mode udp-perf-send -peer '[fe80::peer%awdl0]:12345' -count 1000 -size 1200 -warmup 5 -trials 3 -timeout 20s` | Prints iperf-like transfer, bitrate, datagrams, loss, omit, and RTT summary for each trial. |
 
 ## Performance Snapshot
 
@@ -177,5 +181,5 @@ udp perf local=[fe80::bccd:80ff:fe58:eafe%awdl0]:51984 peer=[fe80::bcb7:e5ff:fe2
 | Secure UDP is not plain UDP | `NWParametersCreateSecureUDP(nil, nil)` attempted DTLS and failed; the backend uses `NWParametersCreate` plus `NWUDPCreateOptions`. |
 | AWDL needs exact private interface selection | Without the private `NWInterface.cInterface` requirement, Network.framework selected `en0`; with it, the path was `awdl0/NWInterfaceTypeWifi`. |
 | Thunderbolt required-interface policy was too strict | `required_interface_type=wired` stayed in Waiting/Preparing; omitting the required type and dialing the bridge link-local address selected `bridge0/NWInterfaceTypeWired`. |
-| AWDL WebRTC needs explicit candidate handling | Pion mDNS did not resolve on `awdl0`, and Pion suppresses raw link-local candidates without a rewrite; `-mdns disabled -raw-candidates` is the demo workaround. |
+| AWDL WebRTC needs explicit candidate handling | Pion mDNS did not resolve on `awdl0`, and Pion suppresses raw link-local candidates without a publish policy; `internal/icepolicy` centralizes the demo workaround. |
 | Full native backend is still broader | A Network.framework-native Pion `transport.Net` would still need a packaged network type, candidate policy, and tests beyond this temporary module. |
