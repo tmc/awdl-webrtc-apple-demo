@@ -16,6 +16,8 @@ The reusable Network.framework surfaces are:
   through Network.framework, while leaving DNS, TCP, unconstrained wildcard
   UDP, and TURN/STUN helper traffic outside that selected UDP surface on
   Pion's standard network fallback.
+- `github.com/tmc/apple-pion/icepolicy`: explicit link-local host-candidate
+  publication helpers used by the demo's `-raw-candidates` signaling path.
 
 It has three profiles:
 
@@ -95,10 +97,11 @@ selected IP set or mDNS publication. mDNS is intentional: Pion filters raw IPv6
 link-local host candidates for privacy.
 
 For explicit two-process signaling, `-mdns disabled -raw-candidates` enables
-the demo's AWDL host-candidate policy. It uses a synthetic non-link-local host
-candidate inside Pion, strips candidates from the SDP, and publishes the
-selected interface IP as explicit `ICECandidateInit` records. This keeps the
-demo no-fork while making AWDL link-local ICE testable without SDP rewriting.
+the reusable `apple-pion/icepolicy` host-candidate policy. It uses a synthetic
+non-link-local host candidate inside Pion, strips candidates from the SDP, and
+publishes the selected interface IP as explicit `ICECandidateInit` records.
+This keeps the demo no-fork while making AWDL link-local ICE testable without
+SDP rewriting.
 
 The `pair` mode creates two local PeerConnections and exchanges a datachannel
 payload over the constrained interface. On this host, Thunderbolt Bridge pairing
