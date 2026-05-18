@@ -20,6 +20,7 @@ message=${MESSAGE:-callback}
 connect_timeout=${CONNECT_TIMEOUT:-5}
 nw_connect_timeout=${NW_CONNECT_TIMEOUT:-2s}
 nw_connect_retries=${NW_CONNECT_RETRIES:-2}
+candidate_policy=${CANDIDATE_POLICY:-auto}
 listen_idle_timeout=${LISTEN_IDLE_TIMEOUT:-2s}
 require_paths=${REQUIRE_PATHS:-0}
 lan_path_interface=${LAN_PATH_INTERFACE:-en0}
@@ -442,6 +443,7 @@ printf 'timeout=%s\n' "$timeout"
 printf 'connect_timeout=%s\n' "$connect_timeout"
 printf 'nw_connect_timeout=%s\n' "$nw_connect_timeout"
 printf 'nw_connect_retries=%s\n' "$nw_connect_retries"
+printf 'candidate_policy=%s\n' "$candidate_policy"
 printf 'listen_idle_timeout=%s\n' "$listen_idle_timeout"
 printf 'require_paths=%s\n' "$require_paths"
 printf 'lan_path_interface=%s\n' "$lan_path_interface"
@@ -465,7 +467,7 @@ remote "chmod +x $(sq "$remote_bin") && $(sq "$remote_bin") -mode check -profile
 
 for profile in $profiles; do
 	printf '## %s Pion transport.Net WebRTC\n' "$profile"
-	record_matrix_step "$profile Pion transport.Net WebRTC" run "$local_bin" -profile "$profile" -backend network -nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries" -pion-net -mdns disabled -raw-candidates -mode offer-ssh -ssh "$ssh_target" -remote-bin "$remote_bin" -timeout "$timeout"
+	record_matrix_step "$profile Pion transport.Net WebRTC" run "$local_bin" -profile "$profile" -backend network -nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries" -pion-net -mdns disabled -candidate-policy "$candidate_policy" -mode offer-ssh -ssh "$ssh_target" -remote-bin "$remote_bin" -timeout "$timeout"
 
 	record_matrix_step "$profile remote-to-local UDP perf" run_local_listener_then_remote_sender "$profile"
 	record_matrix_step "$profile local-to-remote UDP perf" run_remote_listener_then_local_sender "$profile"
