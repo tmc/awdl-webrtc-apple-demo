@@ -17,7 +17,7 @@ not released API.
 | Add a Bonjour-discovered control path | Grove's Network.framework transport can advertise one service and dial a peer service by name; WeightShare uses `NWEndpointCreateBonjourService` for AWDL data transfers. | Add an optional Network.framework/Bonjour signaling mode for offer/answer exchange. SSH would stay useful for orchestration, but the WebRTC proof would no longer depend on SSH as the only control plane. |
 | Add callback-style reverse probes | WeightShare `MeasureAWDLSpeed` starts a temporary callback listener, sends the callback service name to the peer, and has the peer connect back to deliver data. | Use the added `udp-callback-listen` and `udp-callback-request` modes to make the peer send one datagram back to a temporary callback address. This should isolate listener/firewall/path issues behind the LAN/Thunderbolt/AWDL UDP asymmetry once the second Mac is reachable. |
 | Broaden performance modes | Grove perftest has message size, warmup, iterations, duration mode, multi-stream/full-duplex mode, ping-pong latency, CPU/mem profiles, and JSON including path data. WeightShare transfers large chunks and prints path names with throughput. | Keep the current iperf-like UDP output, use the added `-duration`, `-streams`, `udp-latency`, and path JSON modes for longer samples. |
-| Handle transient Network.framework waiting states | Grove's `dialEndpoint` retries until a deadline and treats `NWConnectionStateWaiting` with a grace timer instead of immediately failing. | Consider adding a short waiting-state grace/retry loop to `nwpacket` outbound UDP connections. This is a plausible improvement for Thunderbolt/AWDL local-to-remote readiness timeouts. |
+| Handle transient Network.framework waiting states | Grove's `dialEndpoint` retries until a deadline and treats `NWConnectionStateWaiting` with a grace timer instead of immediately failing. | `tmc/apple v0.6.7` adds `nwpacket.Config.ConnectTimeout` and `ConnectRetries`; this demo uses a 2s readiness timeout with 2 outbound connection retries for both raw UDP and Pion `transport.Net` PacketConns. |
 
 ## Discovery Ideas
 
@@ -81,8 +81,10 @@ inconsistent with the requested profile.
 ## Suggested Order
 
 1. Run `REQUIRE_PATHS=1` remote matrix once the second Mac is reachable.
-2. Validate fixed-duration, multi-stream, and latency-only runs remotely.
-3. Validate callback-style reverse probes on the second Mac to isolate the
+2. Validate whether `tmc/apple v0.6.7` readiness retries clear the old reverse
+   AWDL/Thunderbolt timeout.
+3. Validate fixed-duration, multi-stream, and latency-only runs remotely.
+4. Validate callback-style reverse probes on the second Mac to isolate the
    listener asymmetry.
-4. Add Bonjour discovery/signaling as a second control plane after SSH-based
+5. Add Bonjour discovery/signaling as a second control plane after SSH-based
    validation is green again.

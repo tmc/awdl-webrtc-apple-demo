@@ -8,7 +8,7 @@ See [RESULTS.md](RESULTS.md) for the current answer/output table.
 The reusable Network.framework surfaces are:
 
 - `github.com/tmc/apple/x/network/nwpacket`: a Network.framework
-  `net.PacketConn`, consumed from released `github.com/tmc/apple v0.6.6`.
+  `net.PacketConn`, consumed from released `github.com/tmc/apple v0.6.7`.
 - `github.com/tmc/apple-pion/nwtransport`: a small Pion `transport.Net`
   adapter, consumed from the sibling `tmc/apple-pion` checkout through the
   temporary `replace github.com/tmc/apple-pion => ../apple-pion`. It routes
@@ -72,7 +72,7 @@ The UI advertises a Bonjour service, starts local UDP echo listeners for
 Thunderbolt, AWDL, and LAN when those paths are available, and samples the peer
 in that order. A Thunderbolt path with no replies is marked unavailable for
 that sample and the monitor immediately tries AWDL, then LAN. The monitor is
-intended to keep using the published `github.com/tmc/apple v0.6.6` bindings;
+intended to keep using the published `github.com/tmc/apple v0.6.7` bindings;
 `GOWORK=off` avoids accidentally resolving a sibling checkout.
 
 The `-backend` flag selects `go` or `network`.
@@ -82,7 +82,10 @@ The `-backend` flag selects `go` or `network`.
 - `network` uses Network.framework as a `net.PacketConn`. It creates clear UDP
   parameters, sets `includePeerToPeer`, uses required interface type where it
   works, and for AWDL uses the private `NWInterface.cInterface` object to force
-  the path to `awdl0`.
+  the path to `awdl0`. Network.framework PacketConns use a 2s outbound
+  readiness timeout and 2 retries so transient waiting states recreate the
+  outbound peer connection instead of staying stuck until the full write
+  deadline.
 
 For WebRTC modes, `-pion-net` changes the Pion integration from
 `SetICEUDPMux` to `SettingEngine.SetNet` using `nwtransport`. LAN,
