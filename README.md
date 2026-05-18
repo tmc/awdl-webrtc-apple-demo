@@ -5,8 +5,12 @@ local links using `github.com/tmc/apple` plus Pion WebRTC.
 
 See [RESULTS.md](RESULTS.md) for the current answer/output table.
 
-The reusable Network.framework packet surface is package
-`github.com/tmc/awdl-webrtc-apple-demo/nwpacket`.
+The reusable Network.framework surfaces are:
+
+- `github.com/tmc/awdl-webrtc-apple-demo/nwpacket`: a Network.framework
+  `net.PacketConn`.
+- `github.com/tmc/awdl-webrtc-apple-demo/nwtransport`: a small Pion
+  `transport.Net` adapter that routes UDP listeners through `nwpacket`.
 
 It has three profiles:
 
@@ -30,8 +34,11 @@ go run . -profile awdl -backend go -mode udp -timeout 10s
 go run . -profile awdl -backend go -mode udp-perf -count 1000 -size 1200 -warmup 5 -timeout 20s
 
 go run . -profile lan -backend network -mode gather -timeout 10s
+go run . -profile lan -backend network -pion-net -mode gather -timeout 10s
+go run . -profile lan -backend network -pion-net -mode pair -timeout 15s
 go run . -profile thunderbolt -backend network -mode gather -timeout 10s
 go run . -profile awdl -backend network -mode gather -timeout 10s
+go run . -profile awdl -backend network -pion-net -mode gather -timeout 10s
 go run . -profile awdl -backend network -mdns disabled -raw-candidates -mode gather -timeout 10s
 
 go run . -profile thunderbolt -backend go -mode check
@@ -54,6 +61,12 @@ The `-backend` flag selects `go` or `network`.
   parameters, sets `includePeerToPeer`, uses required interface type where it
   works, and for AWDL uses the private `NWInterface.cInterface` object to force
   the path to `awdl0`.
+
+For WebRTC modes, `-pion-net` changes the Pion integration from
+`SetICEUDPMux` to `SettingEngine.SetNet` using `nwtransport`. LAN and
+Thunderbolt remote datachannels pass through this native Pion network seam.
+AWDL gathers mDNS host candidates through the same seam, but remote AWDL
+datachannels still need the UDP-mux raw-candidate path below.
 
 The `gather` mode binds Pion's ICE UDP mux to the selected interface address,
 enables mDNS host candidates, and verifies candidates are either from the
@@ -82,6 +95,14 @@ go run . -profile thunderbolt -backend network -mode offer-ssh \
 go run . -profile awdl -backend network -mdns disabled -raw-candidates \
   -mode offer-ssh -ssh tmc2@10.0.18.249 \
   -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 45s
+
+go run . -profile lan -backend network -pion-net -mdns disabled \
+  -raw-candidates -mode offer-ssh -ssh tmc2@10.0.18.249 \
+  -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 35s
+
+go run . -profile thunderbolt -backend network -pion-net -mdns disabled \
+  -raw-candidates -mode offer-ssh -ssh tmc2@10.0.18.249 \
+  -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 40s
 ```
 
 The `udp` mode opens two ordinary Go UDP sockets on the selected interface,
@@ -117,7 +138,9 @@ AWDL_DEMO_NETWORK_TRACE=1 go run . -profile awdl -backend network -mode udp-perf
 ```
 
 The Network.framework backend proves Pion ICE gathering, raw UDP echo/perf, and
-remote WebRTC datachannel exchange over LAN, Thunderbolt, and AWDL. It remains a
-demo backend: AWDL WebRTC uses explicit SSH signaling plus raw candidate
-rewriting, and the PacketConn is not a replacement for Pion's full `transport.Net`
-surface.
+remote WebRTC datachannel exchange over LAN, Thunderbolt, and AWDL. The
+`nwtransport` path demonstrates a Pion-native `transport.Net` backend for LAN
+and Thunderbolt WebRTC. AWDL WebRTC still uses explicit SSH signaling plus raw
+candidate rewriting through the UDP mux path; Pion's address-rewrite path
+currently cannot rewrite scoped `fe80::...%awdl0` addresses for native
+`SetNet` gathering.
