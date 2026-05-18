@@ -106,7 +106,7 @@ func main() {
 	backendName := flag.String("backend", string(udpBackendGo), "UDP backend: go or network")
 	pionNet := flag.Bool("pion-net", false, "use Network.framework as Pion transport.Net instead of ICE UDP mux")
 	mdnsName := flag.String("mdns", "query-and-gather", "ICE mDNS mode: query-and-gather, query-only, or disabled")
-	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-ssh, udp, udp-listen, udp-send, udp-callback-listen, udp-callback-request, udp-perf, udp-perf-listen, udp-perf-send, or ui")
+	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-ssh, udp, udp-listen, udp-send, udp-callback-listen, udp-callback-request, udp-perf, udp-perf-listen, udp-perf-send, udp-latency, udp-latency-send, or ui")
 	timeout := flag.Duration("timeout", 8*time.Second, "timeout for WebRTC and UDP modes")
 	peerAddr := flag.String("peer", "", "remote UDP address for udp-send, such as [fe80::1%awdl0]:12345")
 	sshTarget := flag.String("ssh", "", "ssh target for offer-ssh, such as tmc2@10.0.18.249")
@@ -252,6 +252,14 @@ func main() {
 	case "udp-perf-send":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
 			return udpPerfSend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials, *window, *streams, *packetTimeout, *duration, *perfJSON)
+		})
+	case "udp-latency":
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return udpLatency(ctx, profile, iface, backend, *count, *size, *warmup, *trials, *streams, *packetTimeout, *duration, *perfJSON)
+		})
+	case "udp-latency-send":
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return udpLatencySend(ctx, profile, iface, backend, *peerAddr, *count, *size, *warmup, *trials, *streams, *packetTimeout, *duration, *perfJSON)
 		})
 	case "ui":
 		if err := runLinkHealthUI(context.Background(), linkHealthConfig{
@@ -1066,6 +1074,26 @@ type udpPerfRecord struct {
 	Expected      int64   `json:"expected,omitempty"`
 }
 
+type udpLatencyRecord struct {
+	Kind        string  `json:"kind"`
+	Trial       int     `json:"trial,omitempty"`
+	Trials      int     `json:"trials,omitempty"`
+	Count       int     `json:"count,omitempty"`
+	Size        int     `json:"size,omitempty"`
+	DurationNS  int64   `json:"duration_ns,omitempty"`
+	Warmup      int     `json:"warmup,omitempty"`
+	Streams     int     `json:"streams,omitempty"`
+	Datagrams   int     `json:"datagrams"`
+	Lost        int     `json:"lost"`
+	LossPercent float64 `json:"loss_percent"`
+	ElapsedNS   int64   `json:"elapsed_ns"`
+	RTTMinNS    int64   `json:"rtt_min_ns"`
+	RTTAvgNS    int64   `json:"rtt_avg_ns"`
+	RTTP50NS    int64   `json:"rtt_p50_ns"`
+	RTTP95NS    int64   `json:"rtt_p95_ns"`
+	RTTMaxNS    int64   `json:"rtt_max_ns"`
+}
+
 func udpPerf(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup, trials, window, streams int, packetTimeout, duration time.Duration, jsonOut bool) error {
 	if trials <= 0 {
 		return errors.New("udp perf -trials must be positive")
@@ -1227,6 +1255,120 @@ func udpPerfSend(ctx context.Context, profile linkProfile, iface linkInterface, 
 		results = append(results, result)
 	}
 	printUDPPerfSummary(results, jsonOut)
+	return nil
+}
+
+func udpLatency(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, count, size, warmup, trials, streams int, packetTimeout, duration time.Duration, jsonOut bool) error {
+	if trials <= 0 {
+		return errors.New("udp latency -trials must be positive")
+	}
+	if streams <= 0 {
+		return errors.New("udp latency -streams must be positive")
+	}
+	serverLink, err := newLinkPacketConn(profile, iface, backend, "")
+	if err != nil {
+		return err
+	}
+	defer serverLink.conn.Close()
+	clients := make([]net.PacketConn, 0, streams)
+	for i := 0; i < streams; i++ {
+		clientLink, err := newLinkPacketConn(profile, iface, backend, "")
+		if err != nil {
+			return err
+		}
+		defer clientLink.conn.Close()
+		clients = append(clients, clientLink.conn)
+	}
+	server := serverLink.conn
+
+	errc := make(chan error, 1)
+	serverCtx := ctx
+	cancelServer := func() {}
+	expected, err := udpPerfExpected(count, warmup, trials, streams, duration)
+	if err != nil {
+		return err
+	}
+	if duration > 0 {
+		serverCtx, cancelServer = context.WithCancel(ctx)
+	}
+	defer cancelServer()
+	go echoUDPPackets(serverCtx, server, expected, errc)
+
+	serverAddr := server.LocalAddr()
+	fmt.Printf("udp latency server=%s clients=%d network=%s backend=%s server_bound_if=%s streams=%d%s\n",
+		serverAddr, streams, serverLink.network, backend, boundIfString(iface, serverLink.bound), streams, durationSuffix(duration))
+	results := make([]udpPerfResult, 0, trials)
+	for trial := 1; trial <= trials; trial++ {
+		if trials > 1 {
+			fmt.Printf("udp latency trial=%d/%d\n", trial, trials)
+		}
+		result, err := runUDPEchoPerfStreams(ctx, clients, serverAddr, count, size, warmup, 1, packetTimeout, duration)
+		if err != nil {
+			return err
+		}
+		printUDPLatency(result)
+		if jsonOut {
+			printJSON(udpLatencyRecordForTrial(result, trial, trials))
+		}
+		results = append(results, result)
+	}
+	if duration > 0 {
+		cancelServer()
+	}
+	if err := <-errc; err != nil {
+		return err
+	}
+	printUDPLatencySummary(results, jsonOut)
+	return nil
+}
+
+func udpLatencySend(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer string, count, size, warmup, trials, streams int, packetTimeout, duration time.Duration, jsonOut bool) error {
+	if peer == "" {
+		return errors.New("missing -peer for udp-latency-send")
+	}
+	if trials <= 0 {
+		return errors.New("udp latency -trials must be positive")
+	}
+	if streams <= 0 {
+		return errors.New("udp latency -streams must be positive")
+	}
+	networkName, err := udpNetworkForPeer(peer)
+	if err != nil {
+		return err
+	}
+	links := make([]*linkPacketConn, 0, streams)
+	conns := make([]net.PacketConn, 0, streams)
+	for i := 0; i < streams; i++ {
+		link, err := newLinkPacketConn(profile, iface, backend, networkName)
+		if err != nil {
+			return err
+		}
+		defer link.conn.Close()
+		links = append(links, link)
+		conns = append(conns, link.conn)
+	}
+	addr, err := net.ResolveUDPAddr(networkName, peer)
+	if err != nil {
+		return fmt.Errorf("resolve peer %q: %w", peer, err)
+	}
+	fmt.Printf("udp latency local=%s streams=%d peer=%s network=%s backend=%s bound_if=%s%s\n",
+		links[0].conn.LocalAddr(), streams, addr, networkName, links[0].backend, boundIfString(iface, links[0].bound), durationSuffix(duration))
+	results := make([]udpPerfResult, 0, trials)
+	for trial := 1; trial <= trials; trial++ {
+		if trials > 1 {
+			fmt.Printf("udp latency trial=%d/%d\n", trial, trials)
+		}
+		result, err := runUDPEchoPerfStreams(ctx, conns, addr, count, size, warmup, 1, packetTimeout, duration)
+		if err != nil {
+			return err
+		}
+		printUDPLatency(result)
+		if jsonOut {
+			printJSON(udpLatencyRecordForTrial(result, trial, trials))
+		}
+		results = append(results, result)
+	}
+	printUDPLatencySummary(results, jsonOut)
 	return nil
 }
 
@@ -1634,6 +1776,45 @@ func printUDPPerfSummary(results []udpPerfResult, jsonOut bool) {
 	}
 }
 
+func printUDPLatency(result udpPerfResult) {
+	record := udpLatencyRecordForTrial(result, 0, 0)
+	fmt.Println("[ ID] Interval           Datagrams  Lost  Loss    Omit  RTT min/avg/p50/p95/max")
+	if record.Datagrams == 0 {
+		fmt.Printf("[  5] 0.00-%-7.2f sec  %9d  %4d  %6s  %4d  -/-/-/-/-\n",
+			result.Elapsed.Seconds(),
+			result.Count,
+			result.Lost,
+			formatLoss(result.Lost, result.Count),
+			result.Warmup,
+		)
+		return
+	}
+	fmt.Printf("[  5] 0.00-%-7.2f sec  %9d  %4d  %6s  %4d  %s/%s/%s/%s/%s\n",
+		result.Elapsed.Seconds(),
+		result.Count,
+		result.Lost,
+		formatLoss(result.Lost, result.Count),
+		result.Warmup,
+		formatDuration(time.Duration(record.RTTMinNS)),
+		formatDuration(time.Duration(record.RTTAvgNS)),
+		formatDuration(time.Duration(record.RTTP50NS)),
+		formatDuration(time.Duration(record.RTTP95NS)),
+		formatDuration(time.Duration(record.RTTMaxNS)),
+	)
+}
+
+func printUDPLatencySummary(results []udpPerfResult, jsonOut bool) {
+	if len(results) <= 1 {
+		return
+	}
+	result := aggregateUDPPerfResults(results)
+	fmt.Printf("udp latency summary trials=%d\n", len(results))
+	printUDPLatency(result)
+	if jsonOut {
+		printJSON(udpLatencyRecordForSummary(result, len(results)))
+	}
+}
+
 func printUDPPerfListen(packets, bytes int64, elapsed time.Duration, expected int64) {
 	lost := int64(0)
 	if expected > packets {
@@ -1681,6 +1862,39 @@ func udpPerfRecordForTrial(result udpPerfResult, trial, trials int) udpPerfRecor
 	return record
 }
 
+func udpLatencyRecordForTrial(result udpPerfResult, trial, trials int) udpLatencyRecord {
+	rtt := append([]time.Duration(nil), result.RTT...)
+	sort.Slice(rtt, func(i, j int) bool { return rtt[i] < rtt[j] })
+	success := len(rtt)
+	record := udpLatencyRecord{
+		Kind:        "udp_latency",
+		Trial:       trial,
+		Trials:      trials,
+		Count:       result.Count,
+		Size:        result.Size,
+		DurationNS:  result.Duration.Nanoseconds(),
+		Warmup:      result.Warmup,
+		Streams:     result.Streams,
+		Datagrams:   success,
+		Lost:        result.Lost,
+		LossPercent: lossPercent(int64(result.Lost), int64(result.Count)),
+		ElapsedNS:   result.Elapsed.Nanoseconds(),
+	}
+	if success == 0 {
+		return record
+	}
+	total := time.Duration(0)
+	for _, d := range rtt {
+		total += d
+	}
+	record.RTTMinNS = rtt[0].Nanoseconds()
+	record.RTTAvgNS = (total / time.Duration(success)).Nanoseconds()
+	record.RTTP50NS = percentileDuration(rtt, 50).Nanoseconds()
+	record.RTTP95NS = percentileDuration(rtt, 95).Nanoseconds()
+	record.RTTMaxNS = rtt[success-1].Nanoseconds()
+	return record
+}
+
 func aggregateUDPPerfResults(results []udpPerfResult) udpPerfResult {
 	if len(results) == 0 {
 		return udpPerfResult{}
@@ -1711,6 +1925,12 @@ func durationSuffix(duration time.Duration) string {
 func udpPerfRecordForSummary(result udpPerfResult, trials int) udpPerfRecord {
 	record := udpPerfRecordForTrial(result, 0, trials)
 	record.Kind = "udp_perf_summary"
+	return record
+}
+
+func udpLatencyRecordForSummary(result udpPerfResult, trials int) udpLatencyRecord {
+	record := udpLatencyRecordForTrial(result, 0, trials)
+	record.Kind = "udp_latency_summary"
 	return record
 }
 

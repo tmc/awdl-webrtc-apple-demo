@@ -218,6 +218,40 @@ func TestUDPPerfRecordForTrial(t *testing.T) {
 	}
 }
 
+func TestUDPLatencyRecordForTrial(t *testing.T) {
+	result := udpPerfResult{
+		Count:   3,
+		Size:    64,
+		Warmup:  1,
+		Streams: 2,
+		Lost:    1,
+		Elapsed: 10 * time.Millisecond,
+		RTT: []time.Duration{
+			3 * time.Millisecond,
+			time.Millisecond,
+		},
+	}
+	record := udpLatencyRecordForTrial(result, 2, 4)
+	if record.Kind != "udp_latency" || record.Trial != 2 || record.Trials != 4 {
+		t.Fatalf("record identity = %#v", record)
+	}
+	if record.Datagrams != 2 || record.Lost != 1 || record.Streams != 2 {
+		t.Fatalf("record counts = %#v", record)
+	}
+	if record.Size != 64 || record.Warmup != 1 {
+		t.Fatalf("record shape = %#v", record)
+	}
+	if record.LossPercent != 100.0/3.0 {
+		t.Fatalf("loss percent = %v", record.LossPercent)
+	}
+	if record.RTTMinNS != int64(time.Millisecond) || record.RTTMaxNS != int64(3*time.Millisecond) {
+		t.Fatalf("rtt bounds = %#v", record)
+	}
+	if _, err := json.Marshal(record); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUDPPerfRecordForSummary(t *testing.T) {
 	results := []udpPerfResult{
 		{
