@@ -2,6 +2,9 @@
 set -euo pipefail
 
 ssh_target=${SSH_TARGET:-tmc2@10.0.18.249}
+ssh_host=${SSH_HOST:-${ssh_target##*@}}
+ssh_host=${ssh_host#[}
+ssh_host=${ssh_host%]}
 local_bin=${LOCAL_BIN:-/tmp/awdl-webrtc-apple-demo-bin}
 remote_bin=${REMOTE_BIN:-/tmp/awdl-webrtc-apple-demo-bin}
 profiles=${PROFILES:-lan thunderbolt awdl}
@@ -38,6 +41,31 @@ run() {
 	printf ' %q' "$@"
 	printf '\n'
 	"$@"
+}
+
+run_diag() {
+	printf '+'
+	printf ' %q' "$@"
+	printf '\n'
+	"$@" 2>&1 || printf 'command failed exit=%d\n' "$?"
+}
+
+diagnose_local_reachability() {
+	printf '## local reachability diagnostics\n'
+	printf 'ssh_host=%s\n' "$ssh_host"
+	run_diag date -u
+	if [[ $ssh_host == *:* ]]; then
+		run_diag route -n get -inet6 "$ssh_host"
+		run_diag ping6 -c 1 "$ssh_host"
+	else
+		run_diag route -n get "$ssh_host"
+		run_diag ping -c 1 -W 1000 "$ssh_host"
+	fi
+	if command -v nc >/dev/null 2>&1; then
+		run_diag nc -vz -G "$connect_timeout" "$ssh_host" 22
+	fi
+	run_diag scutil --nwi
+	run_diag ifconfig -l
 }
 
 wait_for_peer() {
@@ -349,6 +377,7 @@ record_matrix_step() {
 
 printf '## matrix config\n'
 printf 'ssh_target=%s\n' "$ssh_target"
+printf 'ssh_host=%s\n' "$ssh_host"
 printf 'profiles=%s\n' "$profiles"
 printf 'count=%s\n' "$count"
 printf 'duration=%s\n' "$duration"
@@ -368,6 +397,8 @@ printf 'thunderbolt_path_interface=%s\n' "$thunderbolt_path_interface"
 printf 'local_bin=%s\n' "$local_bin"
 printf 'remote_bin=%s\n' "$remote_bin"
 printf 'output=%s\n' "$output"
+
+diagnose_local_reachability
 
 printf '## remote reachability\n'
 remote "true"
