@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+demo_dir=${DEMO_DIR:-$(cd -- "$script_dir/.." && pwd)}
+apple_dir=${APPLE_DIR:-$(cd -- "$demo_dir/../apple" && pwd)}
+apple_pion_dir=${APPLE_PION_DIR:-$(cd -- "$demo_dir/../apple-pion" && pwd)}
+
+failures=0
+
+section() {
+	printf '## %s\n' "$1"
+}
+
+run() {
+	printf '+'
+	printf ' %q' "$@"
+	printf '\n'
+	"$@"
+}
+
+fail() {
+	printf 'FAIL: %s\n' "$*" >&2
+	failures=$((failures + 1))
+}
+
+warn() {
+	printf 'WARN: %s\n' "$*" >&2
+}
+
+require_clean() {
+	local repo=$1
+	local name=$2
+	local status
+	status=$(git -C "$repo" status --porcelain)
+	if [[ -n $status ]]; then
+		fail "$name worktree is dirty"
+		printf '%s\n' "$status"
+	fi
+}
+
+require_remote() {
+	local repo=$1
+	local name=$2
+	local remote
+	remote=$(git -C "$repo" remote)
+	if [[ -z $remote ]]; then
+		fail "$name has no configured git remote"
+		return
+	fi
+	printf '%s remotes:\n' "$name"
+	git -C "$repo" remote -v
+}
+
+require_head_published() {
+	local repo=$1
+	local name=$2
+	local remote=${3:-origin}
+	local branch=${4:-main}
+	local head remote_head
+	head=$(git -C "$repo" rev-parse HEAD)
+	remote_head=$(git -C "$repo" ls-remote "$remote" "refs/heads/$branch" | awk '{print $1}')
+	if [[ -z $remote_head ]]; then
+		fail "$name cannot read $remote/$branch"
+		return
+	fi
+	printf '%s local=%s remote=%s/%s=%s\n' "$name" "$head" "$remote" "$branch" "$remote_head"
+	if [[ $head != "$remote_head" ]]; then
+		fail "$name HEAD is not published at $remote/$branch"
+	fi
+}
+
+require_no_replace() {
+	local repo=$1
+	local name=$2
+	if grep -q '^replace ' "$repo/go.mod"; then
+		fail "$name go.mod still uses local replace directives"
+		grep '^replace ' "$repo/go.mod"
+	fi
+}
+
+section "local gates"
+run bash -n "$demo_dir/scripts/remote-matrix.sh"
+run go -C "$demo_dir" test ./...
+run go -C "$demo_dir" vet ./...
+run go -C "$apple_pion_dir" test ./...
+run go -C "$apple_pion_dir" vet ./...
+run go -C "$apple_dir" test ./x/network/nwpacket
+run go -C "$apple_dir" vet ./x/network/nwpacket
+
+section "package availability"
+run go -C "$apple_dir" list ./x/network/nwpacket
+run go -C "$apple_pion_dir" list ./...
+run go -C "$demo_dir" list ./...
+
+section "worktree state"
+require_clean "$demo_dir" "awdl-webrtc-apple-demo"
+require_clean "$apple_pion_dir" "apple-pion"
+if [[ -n $(git -C "$apple_dir" status --porcelain -- x/network/nwpacket) ]]; then
+	fail "apple x/network/nwpacket has local changes"
+fi
+if [[ -n $(git -C "$apple_dir" status --porcelain) ]]; then
+	warn "apple worktree has unrelated local changes"
+	git -C "$apple_dir" status --short | sed -n '1,80p'
+fi
+
+section "release blockers"
+require_remote "$demo_dir" "awdl-webrtc-apple-demo"
+require_remote "$apple_pion_dir" "apple-pion"
+require_remote "$apple_dir" "apple"
+require_head_published "$apple_dir" "apple"
+require_no_replace "$demo_dir" "awdl-webrtc-apple-demo"
+require_no_replace "$apple_pion_dir" "apple-pion"
+
+if ((failures != 0)); then
+	printf 'release preflight failed with %d blocker(s)\n' "$failures" >&2
+	exit 1
+fi
+printf 'release preflight passed\n'
