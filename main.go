@@ -24,9 +24,9 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/tmc/apple-pion/nwtransport"
 	applenetwork "github.com/tmc/apple/network"
-	"github.com/tmc/apple/network/nwpacket"
 	"github.com/tmc/apple/objc"
 	"github.com/tmc/apple/objectivec"
+	"github.com/tmc/apple/x/network/nwpacket"
 	"github.com/tmc/awdl-webrtc-apple-demo/internal/icepolicy"
 	"golang.org/x/sys/unix"
 )
