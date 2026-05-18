@@ -3,7 +3,9 @@
 This temporary module shows WebRTC ICE candidate discovery over Apple-specific
 local links using `github.com/tmc/apple` plus Pion WebRTC.
 
-See [RESULTS.md](RESULTS.md) for the current answer/output table.
+See [RESULTS.md](RESULTS.md) for the current answer/output table and
+[docs/completion-audit.md](docs/completion-audit.md) for the strict
+completion checklist.
 
 The reusable Network.framework surfaces are:
 
