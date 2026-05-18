@@ -17,6 +17,7 @@ evidence.
 ```sh
 go test ./...
 go vet ./...
+bash -n scripts/remote-matrix.sh
 go run . -profile lan -backend network -mode gather -timeout 8s
 go run . -profile thunderbolt -backend network -mode gather -timeout 5s
 go run . -profile awdl -backend network -mdns disabled -raw-candidates -mode gather -timeout 10s
@@ -26,6 +27,7 @@ go run . -profile lan -backend go -mode udp-perf-send -peer 10.0.199.147:9 -coun
 go run . -profile lan -backend network -pion-net -mdns disabled -raw-candidates -mode offer-ssh -ssh tmc2@10.0.18.249 -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 35s
 go run . -profile thunderbolt -backend network -pion-net -mdns disabled -raw-candidates -mode offer-ssh -ssh tmc2@10.0.18.249 -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 40s
 go run . -profile awdl -backend network -pion-net -mdns disabled -raw-candidates -mode offer-ssh -ssh tmc2@10.0.18.249 -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 45s
+SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh
 ```
 
 ## Stop Condition

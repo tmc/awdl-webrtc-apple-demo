@@ -67,6 +67,7 @@ Scope terms:
 | Build gate | `go test ./...`; `go vet ./...`; `git diff --check` | Tests pass for the main package and `internal/icepolicy`; vet and whitespace checks pass. |
 | Productized packages | `go test ./internal/icepolicy`; in `tmc/apple`: `go test ./x/network/nwpacket`; in `tmc/apple-pion`: `go test ./...` | `internal/icepolicy`, promoted `nwpacket`, and promoted `nwtransport` tests pass. |
 | Network backend build pin | `go list -m -f '{{.Path}} {{.Version}} {{.Replace.Path}}' github.com/tmc/apple github.com/tmc/apple-pion` | `github.com/tmc/apple v0.6.3 ../apple`; `github.com/tmc/apple-pion v0.0.0 ../apple-pion`. |
+| Remote productization matrix | `SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh` | Builds and copies the demo, then runs LAN/Thunderbolt/AWDL `-pion-net` WebRTC plus Network.framework UDP perf in both directions. Currently blocked because SSH to `tmc2@10.0.18.249` times out. |
 | Network LAN gather | `go run . -profile lan -backend network -mode gather -timeout 8s` | Two mDNS host candidates from an `en0` Network.framework UDP mux. |
 | Pion-native LAN gather | `AWDL_DEMO_NETWORK_TRACE=1 go run . -profile lan -backend network -pion-net -mode gather -timeout 12s` | Ten mDNS host candidates; trace showed Network.framework listeners for each selected `en0` address. |
 | Pion-native LAN pair | `go run . -profile lan -backend network -pion-net -mode pair -timeout 15s` | Same-host datachannel opened and exchanged payload over `en0` through Pion `transport.Net`. |

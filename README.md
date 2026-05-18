@@ -119,6 +119,18 @@ go run . -profile awdl -backend network -pion-net -mdns disabled \
   -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 45s
 ```
 
+To rerun the two-host productization matrix after the peer is reachable, use:
+
+```sh
+SSH_TARGET=tmc2@10.0.18.249 scripts/remote-matrix.sh
+```
+
+The script builds a temporary local binary, copies it to `REMOTE_BIN` on the
+peer, then runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus
+Network.framework UDP perf in both directions. Override `PROFILES`, `COUNT`,
+`WARMUP`, `TRIALS`, `WINDOW`, `TIMEOUT`, `LOCAL_BIN`, or `REMOTE_BIN` to narrow
+or lengthen a run.
+
 The `udp` mode opens two ordinary Go UDP sockets on the selected interface,
 sets Darwin `IP_BOUND_IF` or `IPV6_BOUND_IF` for AWDL or scoped IPv6 sockets,
 and sends one echo datagram. On this host, AWDL UDP passes with IPv6 link-local
