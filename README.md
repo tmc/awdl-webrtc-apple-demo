@@ -60,6 +60,19 @@ Use `-iface` to override the default interface:
 go run . -profile thunderbolt -iface en1 -backend network -mode gather -timeout 10s
 ```
 
+To open the SwiftUI link monitor, run the same command on both Macs:
+
+```sh
+GOWORK=off go run . -mode ui -backend network -ui-interval 3s -ui-count 20 -ui-window 4
+```
+
+The UI advertises a Bonjour service, starts local UDP echo listeners for
+Thunderbolt, AWDL, and LAN when those paths are available, and samples the peer
+in that order. A Thunderbolt path with no replies is marked unavailable for
+that sample and the monitor immediately tries AWDL, then LAN. The monitor is
+intended to keep using the published `github.com/tmc/apple v0.6.4` bindings;
+`GOWORK=off` avoids accidentally resolving a sibling checkout.
+
 The `-backend` flag selects `go` or `network`.
 
 - `go` uses ordinary Darwin UDP sockets. It is the stable throughput and
