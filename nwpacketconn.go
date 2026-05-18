@@ -245,10 +245,11 @@ func (c *nwPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 		}
 		done <- nwErr
 	})
-	if deadline.IsZero() {
-		return len(b), nil
+	wait := 5 * time.Second
+	if !deadline.IsZero() {
+		wait = time.Until(deadline)
 	}
-	timer := time.NewTimer(time.Until(deadline))
+	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
 	case err := <-done:
@@ -338,6 +339,9 @@ func (c *nwPacketConn) peerConn(addr net.Addr) (*nwPeerConn, error) {
 	if err != nil {
 		return nil, err
 	}
+	if udpAddr.Zone == "" && udpAddr.IP.To4() == nil && udpAddr.IP.IsLinkLocalUnicast() {
+		udpAddr.Zone = c.iface.Name
+	}
 	key := udpAddr.String()
 	c.mu.Lock()
 	if peer := c.conns[key]; peer != nil {
@@ -412,9 +416,6 @@ func (p *nwPeerConn) waitReady(deadline time.Time) error {
 
 	select {
 	case err := <-p.ready:
-		if err == nil {
-			time.Sleep(100 * time.Millisecond)
-		}
 		return err
 	case <-timeout:
 		return fmt.Errorf("nw connection %s readiness: %w", p.addr, nwTimeoutError{op: "write"})

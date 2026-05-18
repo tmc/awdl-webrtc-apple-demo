@@ -3,13 +3,18 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -86,9 +91,13 @@ func main() {
 	profileName := flag.String("profile", "awdl", "link profile: awdl, thunderbolt, or lan")
 	ifaceName := flag.String("iface", "", "network interface to constrain ICE candidates to; default depends on profile")
 	backendName := flag.String("backend", string(udpBackendGo), "UDP backend: go or network")
-	mode := flag.String("mode", "check", "mode: check, gather, pair, udp, udp-listen, udp-send, udp-perf, udp-perf-listen, or udp-perf-send")
+	mdnsName := flag.String("mdns", "query-and-gather", "ICE mDNS mode: query-and-gather, query-only, or disabled")
+	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-ssh, udp, udp-listen, udp-send, udp-perf, udp-perf-listen, or udp-perf-send")
 	timeout := flag.Duration("timeout", 8*time.Second, "timeout for WebRTC and UDP modes")
 	peerAddr := flag.String("peer", "", "remote UDP address for udp-send, such as [fe80::1%awdl0]:12345")
+	sshTarget := flag.String("ssh", "", "ssh target for offer-ssh, such as tmc2@10.0.18.249")
+	remoteBin := flag.String("remote-bin", "/tmp/awdl-webrtc-apple-demo-bin", "remote binary path for offer-ssh")
+	rawCandidates := flag.Bool("raw-candidates", false, "rewrite gathered host candidates to the selected interface IP during explicit signaling")
 	message := flag.String("message", "ping", "UDP payload for udp and udp-send")
 	count := flag.Int("count", 1000, "UDP perf datagram count")
 	size := flag.Int("size", 1200, "UDP perf payload size in bytes")
@@ -100,6 +109,10 @@ func main() {
 		fail(err)
 	}
 	backend, err := parseUDPBackend(*backendName)
+	if err != nil {
+		fail(err)
+	}
+	mdnsMode, err := parseMDNSMode(*mdnsName)
 	if err != nil {
 		fail(err)
 	}
@@ -160,13 +173,21 @@ func main() {
 
 	switch *mode {
 	case "check":
-		fmt.Printf("pion webrtc interface_filter=%s network_types=udp4,udp6 mdns=query-and-gather udp_backend=%s\n", iface.Name, backend)
+		fmt.Printf("pion webrtc interface_filter=%s network_types=udp4,udp6 mdns=%s udp_backend=%s\n", iface.Name, mdnsModeString(mdnsMode), backend)
 	case "gather":
-		if err := gather(ctxWithTimeout(*timeout), profile, iface, backend); err != nil {
+		if err := gather(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, *rawCandidates); err != nil {
 			fail(err)
 		}
 	case "pair":
-		if err := pair(ctxWithTimeout(*timeout), profile, iface, backend); err != nil {
+		if err := pair(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, *rawCandidates); err != nil {
+			fail(err)
+		}
+	case "answer-stdio":
+		if err := answerStdio(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, *rawCandidates); err != nil {
+			fail(err)
+		}
+	case "offer-ssh":
+		if err := offerSSH(ctxWithTimeout(*timeout), profile, iface, backend, mdnsMode, *rawCandidates, *timeout, *sshTarget, *remoteBin); err != nil {
 			fail(err)
 		}
 	case "udp":
@@ -233,6 +254,32 @@ func parseUDPBackend(name string) (udpBackend, error) {
 		return udpBackendNetwork, nil
 	default:
 		return "", fmt.Errorf("unknown -backend %q", name)
+	}
+}
+
+func parseMDNSMode(name string) (ice.MulticastDNSMode, error) {
+	switch strings.ToLower(name) {
+	case "query-and-gather", "queryandgather", "gather", "":
+		return ice.MulticastDNSModeQueryAndGather, nil
+	case "query-only", "queryonly":
+		return ice.MulticastDNSModeQueryOnly, nil
+	case "disabled", "disable", "off":
+		return ice.MulticastDNSModeDisabled, nil
+	default:
+		return 0, fmt.Errorf("unknown -mdns %q", name)
+	}
+}
+
+func mdnsModeString(mode ice.MulticastDNSMode) string {
+	switch mode {
+	case ice.MulticastDNSModeQueryAndGather:
+		return "query-and-gather"
+	case ice.MulticastDNSModeQueryOnly:
+		return "query-only"
+	case ice.MulticastDNSModeDisabled:
+		return "disabled"
+	default:
+		return fmt.Sprintf("unknown(%d)", mode)
 	}
 }
 
@@ -385,15 +432,15 @@ func addrIP(addr net.Addr) net.IP {
 	}
 }
 
-func gather(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend) error {
+func gather(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, rawCandidates bool) error {
 	mux, err := newLinkUDPMux(profile, iface, backend)
 	if err != nil {
 		return err
 	}
 	defer mux.Close()
-	fmt.Printf("udp mux listen=%s network=%s backend=%s bound_if=%s mdns=query-and-gather\n",
-		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound))
-	pc, err := newPeer(iface, mux)
+	fmt.Printf("udp mux listen=%s network=%s backend=%s bound_if=%s mdns=%s raw_candidates=%t\n",
+		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), rawCandidates)
+	pc, err := newPeer(iface, mux, mdnsMode, rawCandidates)
 	if err != nil {
 		return err
 	}
@@ -418,7 +465,11 @@ func gather(ctx context.Context, profile linkProfile, iface linkInterface, backe
 	if desc == nil {
 		return errors.New("missing local description after gather")
 	}
-	candidates := candidateLines(desc.SDP)
+	sdp := desc.SDP
+	if rawCandidates {
+		sdp = rewriteHostCandidateAddress(sdp, mux.ip)
+	}
+	candidates := candidateLines(sdp)
 	if len(candidates) == 0 {
 		return fmt.Errorf("no ICE candidates gathered for %s", iface.Name)
 	}
@@ -432,7 +483,7 @@ func gather(ctx context.Context, profile linkProfile, iface linkInterface, backe
 	return nil
 }
 
-func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend) error {
+func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, rawCandidates bool) error {
 	leftMux, err := newLinkUDPMux(profile, iface, backend)
 	if err != nil {
 		return err
@@ -448,12 +499,12 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 	fmt.Printf("right udp mux listen=%s network=%s backend=%s bound_if=%s\n",
 		rightMux.conn.LocalAddr(), rightMux.network, rightMux.backend, boundIfString(iface, rightMux.bound))
 
-	left, err := newPeer(iface, leftMux)
+	left, err := newPeer(iface, leftMux, mdnsMode, rawCandidates)
 	if err != nil {
 		return err
 	}
 	defer left.Close()
-	right, err := newPeer(iface, rightMux)
+	right, err := newPeer(iface, rightMux, mdnsMode, rawCandidates)
 	if err != nil {
 		return err
 	}
@@ -476,7 +527,11 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 		_ = dc.SendText("ping")
 	})
 
-	if err := signalNonTrickle(left, right, ctx); err != nil {
+	if err := signalNonTrickle(left, right, ctx, signalOptions{
+		RawCandidates: rawCandidates,
+		LeftIP:        leftMux.ip,
+		RightIP:       rightMux.ip,
+	}); err != nil {
 		return err
 	}
 	select {
@@ -494,6 +549,195 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 	case <-ctx.Done():
 		return fmt.Errorf("wait for datachannel message over %s: %w", iface.Name, ctx.Err())
 	}
+}
+
+func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, rawCandidates bool) error {
+	mux, err := newLinkUDPMux(profile, iface, backend)
+	if err != nil {
+		return err
+	}
+	defer mux.Close()
+	fmt.Printf("answer udp mux listen=%s network=%s backend=%s bound_if=%s mdns=%s raw_candidates=%t\n",
+		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), rawCandidates)
+
+	pc, err := newPeer(iface, mux, mdnsMode, rawCandidates)
+	if err != nil {
+		return err
+	}
+	defer pc.Close()
+
+	received := make(chan string, 1)
+	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
+		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+			received <- string(msg.Data)
+			_ = dc.SendText("pong")
+		})
+	})
+
+	offer, err := readWireDescription(bufio.NewScanner(os.Stdin), "OFFER")
+	if err != nil {
+		return err
+	}
+	if err := pc.SetRemoteDescription(offer); err != nil {
+		return fmt.Errorf("set remote offer: %w", err)
+	}
+	answer, err := pc.CreateAnswer(nil)
+	if err != nil {
+		return fmt.Errorf("create answer: %w", err)
+	}
+	gathered := webrtc.GatheringCompletePromise(pc)
+	if err := pc.SetLocalDescription(answer); err != nil {
+		return fmt.Errorf("set local answer: %w", err)
+	}
+	if err := wait(ctx, gathered, "answer gather"); err != nil {
+		return err
+	}
+	desc := *pc.LocalDescription()
+	if rawCandidates {
+		desc.SDP = rewriteHostCandidateAddress(desc.SDP, mux.ip)
+	}
+	wire, err := encodeWireDescription(desc)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("ANSWER %s\n", wire)
+
+	select {
+	case got := <-received:
+		fmt.Printf("webrtc answer received %q and sent pong over %s-constrained ICE\n", got, iface.Name)
+		time.Sleep(500 * time.Millisecond)
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for answer datachannel message over %s: %w", iface.Name, ctx.Err())
+	}
+}
+
+func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, mdnsMode ice.MulticastDNSMode, rawCandidates bool, timeout time.Duration, sshTarget, remoteBin string) error {
+	if sshTarget == "" {
+		return errors.New("missing -ssh for offer-ssh")
+	}
+	mux, err := newLinkUDPMux(profile, iface, backend)
+	if err != nil {
+		return err
+	}
+	defer mux.Close()
+	fmt.Printf("offer udp mux listen=%s network=%s backend=%s bound_if=%s mdns=%s raw_candidates=%t\n",
+		mux.conn.LocalAddr(), mux.network, mux.backend, boundIfString(iface, mux.bound), mdnsModeString(mdnsMode), rawCandidates)
+
+	pc, err := newPeer(iface, mux, mdnsMode, rawCandidates)
+	if err != nil {
+		return err
+	}
+	defer pc.Close()
+
+	opened := make(chan struct{})
+	received := make(chan string, 1)
+	dc, err := pc.CreateDataChannel("link-ssh", nil)
+	if err != nil {
+		return fmt.Errorf("create data channel: %w", err)
+	}
+	dc.OnOpen(func() {
+		close(opened)
+		_ = dc.SendText("ping")
+	})
+	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+		received <- string(msg.Data)
+	})
+
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		return fmt.Errorf("create offer: %w", err)
+	}
+	gathered := webrtc.GatheringCompletePromise(pc)
+	if err := pc.SetLocalDescription(offer); err != nil {
+		return fmt.Errorf("set local offer: %w", err)
+	}
+	if err := wait(ctx, gathered, "offer gather"); err != nil {
+		return err
+	}
+	desc := *pc.LocalDescription()
+	if rawCandidates {
+		desc.SDP = rewriteHostCandidateAddress(desc.SDP, mux.ip)
+	}
+	wireOffer, err := encodeWireDescription(desc)
+	if err != nil {
+		return err
+	}
+
+	cmdArgs := []string{
+		sshTarget,
+		remoteBin,
+		"-profile", profile.Name,
+		"-iface", iface.Name,
+		"-backend", string(backend),
+		"-mdns", mdnsModeString(mdnsMode),
+		"-mode", "answer-stdio",
+		"-timeout", timeout.String(),
+	}
+	if rawCandidates {
+		cmdArgs = append(cmdArgs, "-raw-candidates")
+	}
+	cmd := exec.CommandContext(ctx, "ssh", cmdArgs...)
+	cmd.Stderr = os.Stderr
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("ssh stdin: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("ssh stdout: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start ssh: %w", err)
+	}
+	waitc := make(chan error, 1)
+	go func() { waitc <- cmd.Wait() }()
+
+	answerc := make(chan webrtc.SessionDescription, 1)
+	scanErrc := make(chan error, 1)
+	go scanRemoteAnswer(stdout, answerc, scanErrc)
+
+	if _, err := fmt.Fprintf(stdin, "OFFER %s\n", wireOffer); err != nil {
+		return fmt.Errorf("write offer to ssh: %w", err)
+	}
+	if err := stdin.Close(); err != nil {
+		return fmt.Errorf("close ssh stdin: %w", err)
+	}
+
+	var answer webrtc.SessionDescription
+	select {
+	case answer = <-answerc:
+	case err := <-scanErrc:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("wait for ssh answer: %w", ctx.Err())
+	}
+	if err := pc.SetRemoteDescription(answer); err != nil {
+		return fmt.Errorf("set remote answer: %w", err)
+	}
+	select {
+	case <-opened:
+	case <-ctx.Done():
+		return fmt.Errorf("wait for data channel open over %s: %w", iface.Name, ctx.Err())
+	}
+	select {
+	case got := <-received:
+		if got != "pong" {
+			return fmt.Errorf("received %q, want pong", got)
+		}
+		fmt.Printf("webrtc datachannel opened and exchanged payload with %s over %s-constrained ICE\n", sshTarget, iface.Name)
+	case <-ctx.Done():
+		return fmt.Errorf("wait for datachannel pong over %s: %w", iface.Name, ctx.Err())
+	}
+	select {
+	case err := <-waitc:
+		if err != nil {
+			return fmt.Errorf("ssh answer process: %w", err)
+		}
+	case <-time.After(5 * time.Second):
+		return errors.New("ssh answer process did not exit after datachannel exchange")
+	}
+	return nil
 }
 
 func udpEcho(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, message string) error {
@@ -1082,7 +1326,7 @@ func udpNetworkForPeer(peer string) (string, error) {
 	return "udp6", nil
 }
 
-func newPeer(iface linkInterface, udpMux *linkUDPMux) (*webrtc.PeerConnection, error) {
+func newPeer(iface linkInterface, udpMux *linkUDPMux, mdnsMode ice.MulticastDNSMode, rawCandidates bool) (*webrtc.PeerConnection, error) {
 	var se webrtc.SettingEngine
 	se.SetInterfaceFilter(func(name string) bool {
 		return name == iface.Name
@@ -1103,7 +1347,10 @@ func newPeer(iface linkInterface, udpMux *linkUDPMux) (*webrtc.PeerConnection, e
 		webrtc.NetworkTypeUDP6,
 	})
 	se.SetIncludeLoopbackCandidate(false)
-	se.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryAndGather)
+	se.SetICEMulticastDNSMode(mdnsMode)
+	if rawCandidates && mdnsMode == ice.MulticastDNSModeDisabled && udpMux != nil && udpMux.ip.To4() == nil && udpMux.ip.IsLinkLocalUnicast() {
+		se.SetNAT1To1IPs([]string{syntheticHostCandidateIP(udpMux.ip) + "/" + udpMux.ip.String()}, webrtc.ICECandidateTypeHost)
+	}
 	if udpMux != nil {
 		se.SetICEUDPMux(udpMux.mux)
 	}
@@ -1111,7 +1358,20 @@ func newPeer(iface linkInterface, udpMux *linkUDPMux) (*webrtc.PeerConnection, e
 	return api.NewPeerConnection(webrtc.Configuration{})
 }
 
-func signalNonTrickle(left, right *webrtc.PeerConnection, ctx context.Context) error {
+func syntheticHostCandidateIP(ip net.IP) string {
+	if ip.To4() != nil {
+		return "198.18.0.1"
+	}
+	return "fd00::1"
+}
+
+type signalOptions struct {
+	RawCandidates bool
+	LeftIP        net.IP
+	RightIP       net.IP
+}
+
+func signalNonTrickle(left, right *webrtc.PeerConnection, ctx context.Context, opts signalOptions) error {
 	offer, err := left.CreateOffer(nil)
 	if err != nil {
 		return fmt.Errorf("create offer: %w", err)
@@ -1123,7 +1383,11 @@ func signalNonTrickle(left, right *webrtc.PeerConnection, ctx context.Context) e
 	if err := wait(ctx, leftGathered, "left gather"); err != nil {
 		return err
 	}
-	if err := right.SetRemoteDescription(*left.LocalDescription()); err != nil {
+	leftDesc := *left.LocalDescription()
+	if opts.RawCandidates {
+		leftDesc.SDP = rewriteHostCandidateAddress(leftDesc.SDP, opts.LeftIP)
+	}
+	if err := right.SetRemoteDescription(leftDesc); err != nil {
 		return fmt.Errorf("right set remote offer: %w", err)
 	}
 	answer, err := right.CreateAnswer(nil)
@@ -1137,10 +1401,101 @@ func signalNonTrickle(left, right *webrtc.PeerConnection, ctx context.Context) e
 	if err := wait(ctx, rightGathered, "right gather"); err != nil {
 		return err
 	}
-	if err := left.SetRemoteDescription(*right.LocalDescription()); err != nil {
+	rightDesc := *right.LocalDescription()
+	if opts.RawCandidates {
+		rightDesc.SDP = rewriteHostCandidateAddress(rightDesc.SDP, opts.RightIP)
+	}
+	if err := left.SetRemoteDescription(rightDesc); err != nil {
 		return fmt.Errorf("left set remote answer: %w", err)
 	}
 	return nil
+}
+
+func encodeWireDescription(desc webrtc.SessionDescription) (string, error) {
+	data, err := json.Marshal(desc)
+	if err != nil {
+		return "", fmt.Errorf("marshal session description: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+func readWireDescription(scanner *bufio.Scanner, prefix string) (webrtc.SessionDescription, error) {
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, prefix+" ") {
+			continue
+		}
+		return decodeWireDescription(strings.TrimSpace(strings.TrimPrefix(line, prefix+" ")))
+	}
+	if err := scanner.Err(); err != nil {
+		return webrtc.SessionDescription{}, fmt.Errorf("read %s: %w", strings.ToLower(prefix), err)
+	}
+	return webrtc.SessionDescription{}, fmt.Errorf("missing %s line", prefix)
+}
+
+func decodeWireDescription(value string) (webrtc.SessionDescription, error) {
+	data, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return webrtc.SessionDescription{}, fmt.Errorf("decode session description: %w", err)
+	}
+	var desc webrtc.SessionDescription
+	if err := json.Unmarshal(data, &desc); err != nil {
+		return webrtc.SessionDescription{}, fmt.Errorf("unmarshal session description: %w", err)
+	}
+	return desc, nil
+}
+
+func scanRemoteAnswer(r io.Reader, answerc chan<- webrtc.SessionDescription, errc chan<- error) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	sentAnswer := false
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "ANSWER ") {
+			answer, err := decodeWireDescription(strings.TrimSpace(strings.TrimPrefix(line, "ANSWER ")))
+			if err != nil {
+				errc <- err
+				return
+			}
+			answerc <- answer
+			sentAnswer = true
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "remote: %s\n", line)
+	}
+	if err := scanner.Err(); err != nil {
+		errc <- fmt.Errorf("scan ssh answer: %w", err)
+		return
+	}
+	if sentAnswer {
+		return
+	}
+	errc <- errors.New("ssh answer ended before ANSWER line")
+}
+
+func rewriteHostCandidateAddress(sdp string, ip net.IP) string {
+	if ip == nil {
+		return sdp
+	}
+	lines := strings.Split(sdp, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, "\r")
+		if !strings.HasPrefix(trimmed, "a=candidate:") {
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) < 8 || fields[7] != "host" {
+			continue
+		}
+		fields[4] = ip.String()
+		suffix := ""
+		if strings.HasSuffix(line, "\r") {
+			suffix = "\r"
+		}
+		lines[i] = strings.Join(fields, " ") + suffix
+	}
+	return strings.Join(lines, "\n")
 }
 
 func wait(ctx context.Context, ch <-chan struct{}, name string) error {
