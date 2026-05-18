@@ -67,7 +67,7 @@ type linkUDPMux struct {
 }
 
 func main() {
-	profileName := flag.String("profile", "awdl", "link profile: awdl or thunderbolt")
+	profileName := flag.String("profile", "awdl", "link profile: awdl, thunderbolt, or lan")
 	ifaceName := flag.String("iface", "", "network interface to constrain ICE candidates to; default depends on profile")
 	mode := flag.String("mode", "check", "mode: check, gather, pair, udp, udp-listen, udp-send, udp-perf, udp-perf-listen, or udp-perf-send")
 	timeout := flag.Duration("timeout", 8*time.Second, "timeout for WebRTC and UDP modes")
@@ -165,7 +165,7 @@ func main() {
 			fail(err)
 		}
 	case "udp-perf-listen":
-		if err := udpPerfListen(ctxWithTimeout(*timeout), iface); err != nil {
+		if err := udpPerfListen(ctxWithTimeout(*timeout), iface, *count+*warmup); err != nil {
 			fail(err)
 		}
 	case "udp-perf-send":
@@ -192,6 +192,12 @@ func profileByName(name string) (linkProfile, error) {
 		return linkProfile{
 			Name:                  "thunderbolt",
 			RequiredInterfaceType: applenetwork.NWInterfaceTypeWired,
+		}, nil
+	case "lan":
+		return linkProfile{
+			Name:                  "lan",
+			DefaultInterface:      "en0",
+			RequiredInterfaceType: applenetwork.NWInterfaceTypeWifi,
 		}, nil
 	default:
 		return linkProfile{}, fmt.Errorf("unknown -profile %q", name)
@@ -566,7 +572,7 @@ func udpPerf(ctx context.Context, iface linkInterface, count, size, warmup int) 
 	return nil
 }
 
-func udpPerfListen(ctx context.Context, iface linkInterface) error {
+func udpPerfListen(ctx context.Context, iface linkInterface, expected int) error {
 	bindIf := shouldBindUDPToInterface(iface, "")
 	conn, _, networkName, bound, err := listenUDPOnInterface(iface, bindIf)
 	if err != nil {
@@ -594,6 +600,10 @@ func udpPerfListen(ctx context.Context, iface linkInterface) error {
 		bytes += int64(n)
 		if _, err := conn.WriteToUDP(buf[:n], addr); err != nil {
 			return fmt.Errorf("udp perf listen write %s: %w", addr, err)
+		}
+		if expected > 0 && packets >= int64(expected) {
+			printUDPPerfListen(packets, bytes, time.Since(start))
+			return nil
 		}
 	}
 }
