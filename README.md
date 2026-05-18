@@ -172,8 +172,9 @@ scripts/release-preflight.sh
 ```
 
 It verifies the local gates and package availability, then fails until the demo
-and `apple-pion` have remotes and the remaining local `apple-pion` replace can
-be removed.
+and `apple-pion` have remotes, their HEADs are published, and the remaining
+local `apple-pion` replace can be removed so the demo resolves `apple-pion`
+from the module cache.
 
 The `udp` mode opens two ordinary Go UDP sockets on the selected interface,
 sets Darwin `IP_BOUND_IF` or `IPV6_BOUND_IF` for AWDL or scoped IPv6 sockets,
