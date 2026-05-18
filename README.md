@@ -5,7 +5,7 @@ local links using `github.com/tmc/apple` plus Pion WebRTC.
 
 See [RESULTS.md](RESULTS.md) for the current answer/output table.
 
-It has two profiles:
+It has three profiles:
 
 - `awdl`: uses `awdl0`, sets public Network.framework UDP parameters to include
   peer-to-peer Wi-Fi, and uses private `NWParameters` knobs for `useAWDL`,
@@ -14,6 +14,8 @@ It has two profiles:
 - `thunderbolt`: uses the Thunderbolt Bridge, normally `bridge0`, sets public
   Network.framework UDP parameters to wired Ethernet, and uses private
   `NWParameters` to require the exact bridge interface.
+- `lan`: uses `en0`, sets public Network.framework UDP parameters to Wi-Fi, and
+  uses private `NWParameters` to require the exact LAN interface.
 
 Run the local checks:
 
@@ -22,6 +24,9 @@ go run . -profile awdl -mode check
 go run . -profile awdl -mode gather -timeout 10s
 go run . -profile awdl -mode udp -timeout 10s
 go run . -profile awdl -mode udp-perf -count 1000 -size 1200 -warmup 5 -timeout 20s
+
+go run . -profile lan -mode check
+go run . -profile lan -mode udp-perf -count 1000 -size 1200 -warmup 5 -timeout 20s
 
 go run . -profile thunderbolt -mode check
 go run . -profile thunderbolt -mode gather -timeout 10s
