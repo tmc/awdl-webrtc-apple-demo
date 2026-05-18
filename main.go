@@ -96,8 +96,10 @@ type linkWebRTCNet struct {
 type udpBackend string
 
 const (
-	udpBackendGo      udpBackend = "go"
-	udpBackendNetwork udpBackend = "network"
+	udpBackendGo          udpBackend = "go"
+	udpBackendNetwork     udpBackend = "network"
+	networkConnectTimeout            = 2 * time.Second
+	networkConnectRetries            = 2
 )
 
 func main() {
@@ -2219,6 +2221,8 @@ func newNetworkLinkTransportNet(profile linkProfile, iface linkInterface) (piont
 			IncludePeerToPeer:     profile.IncludePeerToPeer,
 			RequireInterface:      profile.Name == "awdl",
 			ReuseLocalAddress:     true,
+			ConnectTimeout:        networkConnectTimeout,
+			ConnectRetries:        networkConnectRetries,
 			QueueLabel:            "com.github.tmc.awdl-webrtc-apple-demo.network-transport",
 			Tracef:                networkTracef,
 		},
@@ -2299,6 +2303,8 @@ func newNetworkLinkPacketConn(profile linkProfile, iface linkInterface, networkN
 		IncludePeerToPeer:     profile.IncludePeerToPeer,
 		RequireInterface:      profile.Name == "awdl",
 		ReuseLocalAddress:     true,
+		ConnectTimeout:        networkConnectTimeout,
+		ConnectRetries:        networkConnectRetries,
 		QueueLabel:            "com.github.tmc.awdl-webrtc-apple-demo.network-packetconn",
 		Tracef:                networkTracef,
 	})
