@@ -156,6 +156,26 @@ func TestDecodeWireSignalAcceptsLegacyDescription(t *testing.T) {
 	}
 }
 
+func TestUDPCallbackWireRequest(t *testing.T) {
+	data, err := marshalUDPCallbackRequest("[fe80::1%awdl0]:12345", "ping")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := parseUDPCallbackRequest(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Callback != "[fe80::1%awdl0]:12345" || req.Message != "ping" {
+		t.Fatalf("callback request = %#v", req)
+	}
+	if _, err := marshalUDPCallbackRequest("", "ping"); err == nil {
+		t.Fatal("marshal empty callback succeeded")
+	}
+	if _, err := parseUDPCallbackRequest([]byte(`{"message":"ping"}`)); err == nil {
+		t.Fatal("parse missing callback succeeded")
+	}
+}
+
 func TestUDPPerfRecordForTrial(t *testing.T) {
 	result := udpPerfResult{
 		Count:    3,

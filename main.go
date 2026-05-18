@@ -106,7 +106,7 @@ func main() {
 	backendName := flag.String("backend", string(udpBackendGo), "UDP backend: go or network")
 	pionNet := flag.Bool("pion-net", false, "use Network.framework as Pion transport.Net instead of ICE UDP mux")
 	mdnsName := flag.String("mdns", "query-and-gather", "ICE mDNS mode: query-and-gather, query-only, or disabled")
-	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-ssh, udp, udp-listen, udp-send, udp-perf, udp-perf-listen, udp-perf-send, or ui")
+	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-ssh, udp, udp-listen, udp-send, udp-callback-listen, udp-callback-request, udp-perf, udp-perf-listen, udp-perf-send, or ui")
 	timeout := flag.Duration("timeout", 8*time.Second, "timeout for WebRTC and UDP modes")
 	peerAddr := flag.String("peer", "", "remote UDP address for udp-send, such as [fe80::1%awdl0]:12345")
 	sshTarget := flag.String("ssh", "", "ssh target for offer-ssh, such as tmc2@10.0.18.249")
@@ -227,6 +227,14 @@ func main() {
 	case "udp-send":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
 			return udpSend(ctx, profile, iface, backend, *peerAddr, *message)
+		})
+	case "udp-callback-listen":
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return udpCallbackListen(ctx, profile, iface, backend)
+		})
+	case "udp-callback-request":
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return udpCallbackRequest(ctx, profile, iface, backend, *peerAddr, *message)
 		})
 	case "udp-perf":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
@@ -893,6 +901,128 @@ func udpSend(ctx context.Context, profile linkProfile, iface linkInterface, back
 	}
 	fmt.Printf("udp received %q from %s\n", string(buf[:n]), from)
 	return nil
+}
+
+type udpCallbackWireRequest struct {
+	Callback string `json:"callback"`
+	Message  string `json:"message,omitempty"`
+}
+
+func udpCallbackListen(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend) error {
+	link, err := newLinkPacketConn(profile, iface, backend, "")
+	if err != nil {
+		return err
+	}
+	defer link.conn.Close()
+	conn := link.conn
+	fmt.Printf("udp callback listen=%s network=%s backend=%s bound_if=%s\n",
+		conn.LocalAddr(), link.network, link.backend, boundIfString(iface, link.bound))
+
+	buf := make([]byte, 4096)
+	_ = conn.SetReadDeadline(deadline(ctx))
+	n, from, err := conn.ReadFrom(buf)
+	if err != nil {
+		return fmt.Errorf("udp callback listen read: %w", err)
+	}
+	req, err := parseUDPCallbackRequest(buf[:n])
+	if err != nil {
+		return fmt.Errorf("udp callback request from %s: %w", from, err)
+	}
+	if err := sendUDPCallback(ctx, profile, iface, backend, link, req); err != nil {
+		return err
+	}
+	fmt.Printf("udp callback received request from %s callback=%s sent=%q\n",
+		from, req.Callback, callbackPayload(req.Message))
+	return nil
+}
+
+func udpCallbackRequest(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, peer, message string) error {
+	if peer == "" {
+		return errors.New("missing -peer for udp-callback-request")
+	}
+	networkName, err := udpNetworkForPeer(peer)
+	if err != nil {
+		return err
+	}
+	link, err := newLinkPacketConn(profile, iface, backend, networkName)
+	if err != nil {
+		return err
+	}
+	defer link.conn.Close()
+	conn := link.conn
+	addr, err := net.ResolveUDPAddr(networkName, peer)
+	if err != nil {
+		return fmt.Errorf("resolve peer %q: %w", peer, err)
+	}
+	req, err := marshalUDPCallbackRequest(conn.LocalAddr().String(), message)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("udp callback local=%s peer=%s network=%s backend=%s bound_if=%s\n",
+		conn.LocalAddr(), addr, networkName, link.backend, boundIfString(iface, link.bound))
+	_ = conn.SetWriteDeadline(deadline(ctx))
+	if _, err := conn.WriteTo(req, addr); err != nil {
+		return fmt.Errorf("udp callback request %s: %w", addr, err)
+	}
+	buf := make([]byte, 4096)
+	_ = conn.SetReadDeadline(deadline(ctx))
+	n, from, err := conn.ReadFrom(buf)
+	if err != nil {
+		return fmt.Errorf("udp callback receive: %w", err)
+	}
+	want := callbackPayload(message)
+	if got := string(buf[:n]); got != want {
+		return fmt.Errorf("udp callback = %q, want %q", got, want)
+	}
+	fmt.Printf("udp callback received %q from %s\n", string(buf[:n]), from)
+	return nil
+}
+
+func sendUDPCallback(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, link *linkPacketConn, req udpCallbackWireRequest) error {
+	networkName, err := udpNetworkForPeer(req.Callback)
+	if err != nil {
+		return err
+	}
+	conn := link.conn
+	if networkName != link.network {
+		sendLink, err := newLinkPacketConn(profile, iface, backend, networkName)
+		if err != nil {
+			return err
+		}
+		defer sendLink.conn.Close()
+		conn = sendLink.conn
+	}
+	addr, err := net.ResolveUDPAddr(networkName, req.Callback)
+	if err != nil {
+		return fmt.Errorf("resolve callback %q: %w", req.Callback, err)
+	}
+	_ = conn.SetWriteDeadline(deadline(ctx))
+	if _, err := conn.WriteTo([]byte(callbackPayload(req.Message)), addr); err != nil {
+		return fmt.Errorf("udp callback write %s: %w", addr, err)
+	}
+	return nil
+}
+
+func marshalUDPCallbackRequest(callback, message string) ([]byte, error) {
+	if strings.TrimSpace(callback) == "" {
+		return nil, errors.New("missing callback address")
+	}
+	return json.Marshal(udpCallbackWireRequest{Callback: callback, Message: message})
+}
+
+func parseUDPCallbackRequest(data []byte) (udpCallbackWireRequest, error) {
+	var req udpCallbackWireRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return udpCallbackWireRequest{}, err
+	}
+	if strings.TrimSpace(req.Callback) == "" {
+		return udpCallbackWireRequest{}, errors.New("missing callback address")
+	}
+	return req, nil
+}
+
+func callbackPayload(message string) string {
+	return "callback:" + message
 }
 
 type udpPerfResult struct {
