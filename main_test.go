@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 	"github.com/tmc/apple-pion/icepolicy"
 	applenetwork "github.com/tmc/apple/network"
@@ -145,6 +146,91 @@ func TestDefaultThunderboltInterface(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("defaultThunderboltInterface() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewCandidatePolicyConfig(t *testing.T) {
+	tests := []struct {
+		name      string
+		profile   linkProfile
+		iface     linkInterface
+		mdnsMode  ice.MulticastDNSMode
+		mode      string
+		legacyRaw bool
+		wantMode  candidatePolicyMode
+		wantRaw   bool
+		wantErr   bool
+	}{
+		{
+			name:     "auto awdl disabled mdns uses raw",
+			profile:  linkProfile{Name: "awdl", UseAWDL: true},
+			iface:    linkInterface{Name: "awdl0", IPs: []net.IP{net.ParseIP("fe80::1")}},
+			mdnsMode: ice.MulticastDNSModeDisabled,
+			mode:     "auto",
+			wantMode: candidatePolicyAuto,
+			wantRaw:  true,
+		},
+		{
+			name:     "auto awdl mdns keeps mdns",
+			profile:  linkProfile{Name: "awdl", UseAWDL: true},
+			iface:    linkInterface{Name: "awdl0", IPs: []net.IP{net.ParseIP("fe80::1")}},
+			mdnsMode: ice.MulticastDNSModeQueryAndGather,
+			mode:     "auto",
+			wantMode: candidatePolicyAuto,
+		},
+		{
+			name:     "auto lan disabled mdns keeps raw off",
+			profile:  linkProfile{Name: "lan"},
+			iface:    linkInterface{Name: "en0", IPs: []net.IP{net.ParseIP("172.20.10.5")}},
+			mdnsMode: ice.MulticastDNSModeDisabled,
+			mode:     "auto",
+			wantMode: candidatePolicyAuto,
+		},
+		{
+			name:     "auto link local ipv6 disabled mdns uses raw",
+			profile:  linkProfile{Name: "test"},
+			iface:    linkInterface{Name: "en9", IPs: []net.IP{net.ParseIP("fe80::abcd")}},
+			mdnsMode: ice.MulticastDNSModeDisabled,
+			mode:     "auto",
+			wantMode: candidatePolicyAuto,
+			wantRaw:  true,
+		},
+		{
+			name:      "legacy raw aliases raw mode",
+			profile:   linkProfile{Name: "awdl", UseAWDL: true},
+			iface:     linkInterface{Name: "awdl0", IPs: []net.IP{net.ParseIP("fe80::1")}},
+			mdnsMode:  ice.MulticastDNSModeDisabled,
+			mode:      "auto",
+			legacyRaw: true,
+			wantMode:  candidatePolicyRaw,
+			wantRaw:   true,
+		},
+		{
+			name:      "legacy raw conflicts with mdns policy",
+			profile:   linkProfile{Name: "awdl", UseAWDL: true},
+			iface:     linkInterface{Name: "awdl0", IPs: []net.IP{net.ParseIP("fe80::1")}},
+			mdnsMode:  ice.MulticastDNSModeDisabled,
+			mode:      "mdns",
+			legacyRaw: true,
+			wantErr:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := newCandidatePolicyConfig(tt.profile, tt.iface, tt.mdnsMode, tt.mode, tt.legacyRaw)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("newCandidatePolicyConfig err = %v, wantErr %t", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if got.Mode != tt.wantMode {
+				t.Fatalf("mode = %s, want %s", got.Mode, tt.wantMode)
+			}
+			if got.Policy.RawHostCandidates != tt.wantRaw {
+				t.Fatalf("raw host candidates = %t, want %t", got.Policy.RawHostCandidates, tt.wantRaw)
 			}
 		})
 	}
