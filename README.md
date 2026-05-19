@@ -184,8 +184,10 @@ printed listener host/port plus sender-side route checks before sending, so
 zero-datagram failures have socket and route context in the transcript. The
 `cmd/matrix-summary` command reads the saved transcript and renders the JSON
 perf/latency records plus de-duplicated failed matrix steps as a compact
-Markdown table. Use `scripts/remote-matrix-bundle.sh` when you want both files
-written in one run; it preserves the matrix exit code after writing the summary.
+Markdown table. WebRTC timeout trace snapshots are summarized as `webrtc_trace`
+rows with candidate addresses and candidate-pair request/response counters. Use
+`scripts/remote-matrix-bundle.sh` when you want both files written in one run;
+it preserves the matrix exit code after writing the summary.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `OUTPUT`,
 `NW_CONNECT_TIMEOUT`, `NW_CONNECT_RETRIES`, `CANDIDATE_POLICY`, or

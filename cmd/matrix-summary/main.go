@@ -39,9 +39,10 @@ type interfaceRecord struct {
 }
 
 type tableRow struct {
-	Section string
-	Record  resultRecord
-	Failure string
+	Section    string
+	Record     resultRecord
+	Failure    string
+	Diagnostic string
 }
 
 func main() {
@@ -75,6 +76,7 @@ func run(args []string, out io.Writer) error {
 func parseRows(in io.Reader) ([]tableRow, error) {
 	var rows []tableRow
 	seenFailures := make(map[string]bool)
+	seenDiagnostics := make(map[string]bool)
 	section := ""
 	scanner := bufio.NewScanner(in)
 	buf := make([]byte, 0, 64*1024)
@@ -90,6 +92,14 @@ func parseRows(in io.Reader) ([]tableRow, error) {
 			if !seenFailures[failure] {
 				rows = append(rows, tableRow{Section: section, Failure: failure})
 				seenFailures[failure] = true
+			}
+			continue
+		}
+		if diagnostic := summarizeWebRTCTrace(line); diagnostic != "" {
+			key := section + "\x00" + diagnostic
+			if !seenDiagnostics[key] {
+				rows = append(rows, tableRow{Section: section, Diagnostic: diagnostic})
+				seenDiagnostics[key] = true
 			}
 			continue
 		}
@@ -119,6 +129,13 @@ func printTable(out io.Writer, rows []tableRow) {
 			fmt.Fprintf(out, "| %s | failure | - | - | - | - | - | - | - | - | - | %s |\n",
 				escapeCell(row.Section),
 				escapeCell(row.Failure),
+			)
+			continue
+		}
+		if row.Diagnostic != "" {
+			fmt.Fprintf(out, "| %s | webrtc_trace | - | - | - | - | - | - | - | - | - | %s |\n",
+				escapeCell(row.Section),
+				escapeCell(row.Diagnostic),
 			)
 			continue
 		}
@@ -220,6 +237,123 @@ func formatPaths(paths []pathRecord) string {
 		}
 	}
 	return strings.Join(parts, "; ")
+}
+
+func summarizeWebRTCTrace(line string) string {
+	if !strings.Contains(line, "webrtc_state") || !strings.Contains(line, "webrtc_stats") {
+		return ""
+	}
+	var parts []string
+	for _, segment := range strings.Split(line, ";") {
+		segment = strings.TrimSpace(segment)
+		if !strings.Contains(segment, "webrtc_state") || !strings.Contains(segment, "webrtc_stats") {
+			continue
+		}
+		label := fieldValue(segment, "label")
+		if label == "" {
+			label = "peer"
+		}
+		iceState := fieldValue(segment, "ice_connection")
+		peerState := fieldValue(segment, "peer_connection")
+		dataChannel := fieldValue(segment, "datachannel")
+		localCandidates := compactCandidateList(fieldValue(segment, "local_candidates"))
+		remoteCandidates := compactCandidateList(fieldValue(segment, "remote_candidates"))
+		candidatePairs := compactCandidatePairList(fieldValue(segment, "candidate_pairs"))
+		parts = append(parts, fmt.Sprintf("%s ice=%s peer=%s dc=%s local=%s remote=%s pairs=%s",
+			label,
+			dash(iceState),
+			dash(peerState),
+			dash(dataChannel),
+			localCandidates,
+			remoteCandidates,
+			candidatePairs,
+		))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func fieldValue(s, key string) string {
+	prefix := key + "="
+	start := strings.Index(s, prefix)
+	if start < 0 {
+		return ""
+	}
+	value := s[start+len(prefix):]
+	if end := strings.IndexByte(value, ' '); end >= 0 {
+		value = value[:end]
+	}
+	return strings.TrimSpace(value)
+}
+
+func compactCandidateList(value string) string {
+	items := bracketItems(value)
+	if len(items) == 0 {
+		return "[]"
+	}
+	for i, item := range items {
+		items[i] = compactCandidate(item)
+	}
+	return bracketedList(items)
+}
+
+func compactCandidate(item string) string {
+	for _, marker := range []string{":host/udp/", ":srflx/udp/", ":relay/udp/"} {
+		if i := strings.Index(item, marker); i >= 0 {
+			return strings.TrimPrefix(marker, ":") + item[i+len(marker):]
+		}
+	}
+	return item
+}
+
+func compactCandidatePairList(value string) string {
+	items := bracketItems(value)
+	if len(items) == 0 {
+		return "[]"
+	}
+	for i, item := range items {
+		items[i] = compactCandidatePair(item)
+	}
+	return bracketedList(items)
+}
+
+func compactCandidatePair(item string) string {
+	idx := strings.Index(item, ":nominated=")
+	if idx < 0 {
+		return item
+	}
+	prefix := item[:idx]
+	state := prefix
+	if colon := strings.LastIndexByte(prefix, ':'); colon >= 0 {
+		state = prefix[colon+1:]
+	}
+	return state + " " + item[idx+1:]
+}
+
+func bracketItems(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "[]" {
+		return nil
+	}
+	value = strings.TrimPrefix(value, "[")
+	value = strings.TrimSuffix(value, "]")
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return strings.Split(value, ",")
+}
+
+func bracketedList(items []string) string {
+	if len(items) == 0 {
+		return "[]"
+	}
+	return "[" + strings.Join(items, ",") + "]"
+}
+
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 func escapeCell(s string) string {
