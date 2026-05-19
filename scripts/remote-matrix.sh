@@ -39,7 +39,10 @@ discovery_peer=${DISCOVERY_PEER:-}
 discovery_timeout=${DISCOVERY_TIMEOUT:-20s}
 discovery_interval=${DISCOVERY_INTERVAL:-500ms}
 discovery_backend=${DISCOVERY_BACKEND:-network}
-discovery_publish_timeout=${DISCOVERY_PUBLISH_TIMEOUT:-60s}
+# Keep runtime discovery listeners alive for long soak runs; the process is
+# still killed by cleanup on normal or failing exits.
+discovery_publish_timeout=${DISCOVERY_PUBLISH_TIMEOUT:-2h}
+discovery_publish_interval=${DISCOVERY_PUBLISH_INTERVAL:-5s}
 discovery_probe=${DISCOVERY_PROBE:-1}
 discovery_lan_peer=
 discovery_thunderbolt_peer=
@@ -166,7 +169,7 @@ start_remote_discovery() {
 	remote_discovery_log=$(mktemp)
 	printf '## start remote discovery publisher\n'
 	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" \
-		"$(sq "$remote_bin") -mode discover -backend $(sq "$discovery_backend") -timeout $(sq "$discovery_publish_timeout") -ui-interval $(sq "$discovery_interval")" \
+		"$(sq "$remote_bin") -mode discover -backend $(sq "$discovery_backend") -timeout $(sq "$discovery_publish_timeout") -ui-interval $(sq "$discovery_publish_interval")" \
 		>"$remote_discovery_log" 2>&1 &
 	remote_discovery_pid=$!
 }
@@ -862,6 +865,7 @@ printf 'discovery_timeout=%s\n' "$discovery_timeout"
 printf 'discovery_interval=%s\n' "$discovery_interval"
 printf 'discovery_backend=%s\n' "$discovery_backend"
 printf 'discovery_publish_timeout=%s\n' "$discovery_publish_timeout"
+printf 'discovery_publish_interval=%s\n' "$discovery_publish_interval"
 printf 'discovery_probe=%s\n' "$discovery_probe"
 printf 'local_bin=%s\n' "$local_bin"
 printf 'remote_bin=%s\n' "$remote_bin"
