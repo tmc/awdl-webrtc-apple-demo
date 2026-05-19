@@ -5,7 +5,9 @@ local links using `github.com/tmc/apple` plus Pion WebRTC.
 
 See [RESULTS.md](RESULTS.md) for the current answer/output table and
 [docs/completion-audit.md](docs/completion-audit.md) for the strict
-completion checklist.
+completion checklist. See
+[docs/libp2p-awdl-thunderbolt.md](docs/libp2p-awdl-thunderbolt.md) for the
+current libp2p AWDL and Thunderbolt integration investigation.
 
 The reusable Network.framework surfaces are:
 
