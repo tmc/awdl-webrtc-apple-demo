@@ -27,8 +27,8 @@ remote demo processes whose command line starts with the configured binary path.
 
 ## Current State
 
-The peer was not reachable on 2026-05-19, so no two-host Bonjour proof was
-claimed. The blocked run is saved at:
+The peer was not usable for harness control on 2026-05-19, so no two-host
+Bonjour proof was claimed. The blocked run is saved at:
 
 ```text
 /tmp/awdl-webrtc-bonjour-unreachable-20260519.txt
@@ -42,6 +42,9 @@ Observed local diagnostics:
 | Ping | 100% packet loss |
 | TCP/22 | `Host is down` or `No route to host` |
 | SSH readiness | failed with exit 255 |
+
+A later fresh check reached `10.0.18.249` by ping, but TCP/22 returned
+`Connection refused`, so the SSH-controlled harness is still blocked.
 
 ## Passing Criteria
 
