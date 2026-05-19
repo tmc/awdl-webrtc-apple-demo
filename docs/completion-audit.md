@@ -55,7 +55,7 @@ that need two Macs.
 | Add iperf-like output and result tables | UDP summary printers in `main.go`; `cmd/matrix-summary`; [RESULTS.md](../RESULTS.md). | Output includes transfer, bitrate, datagrams, loss, RTT, JSON, path records, summaries, and Markdown tables. | Longer comparative runs still need live peer access. |
 | Package reusable pieces out of the temporary demo | `github.com/tmc/apple/x/network/nwpacket`; `github.com/tmc/apple-pion/nwtransport`; `github.com/tmc/apple-pion/icepolicy`. | Reusable packages have tests/examples and are consumed by the demo through the checked-in workspace. | None for the package split. |
 | Add SwiftUI link-health view with fallback | `ui.go`; `ui_test.go`; `-mode ui`; `-mode discover`; `-mode discover-wait`; README UI and discovery commands. | UI advertises Bonjour TXT metadata, samples Thunderbolt, AWDL, then LAN, and falls back when a higher-priority path returns no replies. Headless discovery emitted JSON records with local Thunderbolt, AWDL, and LAN listener addresses; `discover-wait` emitted one matching peer record when a local publisher was present. TXT metadata includes advertised version, commit, and supported modes when available. | It measures UDP link health, not WebRTC datachannel health. A two-live-Mac UI session is still worth doing. |
-| Avoid SSH as the only control plane | `offer-stdio`, `answer-stdio`, `offer-bonjour`, and `answer-bonjour`; README manual and Bonjour signaling workflows. | Parser tests pass; local stdio smoke exchanged `OFFER` and `ANSWER` lines. Bonjour signaling advertises `_awdl-webrtc-signal._tcp`, falls back from Bonjour endpoint dialing to `NSNetService` host/port resolution, and `-signal-only` exchanged local `OFFER`/`ANSWER` lines with exit 0 on both sides. | Same-host stdio and full Bonjour datachannels did not open; both reached ICE checking with no same-host candidate-pair responses. Two-host Bonjour signaling still needs a reachable peer. |
+| Avoid SSH as the only control plane | `offer-stdio`, `answer-stdio`, `offer-bonjour`, `answer-bonjour`, [../scripts/remote-bonjour.sh](../scripts/remote-bonjour.sh), and README manual/Bonjour workflows. | Parser tests pass; local stdio smoke exchanged `OFFER` and `ANSWER` lines. Bonjour signaling advertises `_awdl-webrtc-signal._tcp`, falls back from Bonjour endpoint dialing to `NSNetService` host/port resolution, and `-signal-only` exchanged local `OFFER`/`ANSWER` lines with exit 0 on both sides. `remote-bonjour.sh` now launches a two-host signal/full Bonjour proof while using SSH only for process control. | Same-host stdio and full Bonjour datachannels did not open; both reached ICE checking with no same-host candidate-pair responses. The current peer was unreachable on 2026-05-19, so the two-host Bonjour proof remains blocked on peer availability. |
 | Keep repo hygiene and atomic history | Git commits and notes; `git status`; workspace gates. | Demo changes are split into atomic code commits with docs layered separately; `apple-pion` is clean; unrelated untracked files in `tmc/apple` are preserved. | Push/publish policy is separate from this local workspace proof. |
 
 ## Requirement Checklist
@@ -97,6 +97,13 @@ REMOTE_BIN=/Volumes/Shared/awdl-webrtc-apple-demo-bin-workspace \
 OUTPUT=/tmp/awdl-webrtc-matrix.txt \
 SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-summary.md \
 scripts/remote-matrix-bundle.sh
+
+REMOTE_READY_TIMEOUT=30 \
+PROFILES="lan thunderbolt awdl" \
+PHASES="signal full" \
+SSH_TARGET=tmc2@10.0.18.249 \
+OUTPUT=/tmp/awdl-webrtc-bonjour.txt \
+scripts/remote-bonjour.sh
 
 DURATION=10s TRIALS=5 WINDOW=8 STREAMS=2 CANDIDATE_POLICY=auto REQUIRE_PATHS=1 \
 REMOTE_READY_TIMEOUT=30 REMOTE_STEP_READY_TIMEOUT=30 \

@@ -193,6 +193,22 @@ datachannel, so use two Macs for the real link proof. Add `-signal-only` on
 both sides to exit successfully after the WebRTC `OFFER`/`ANSWER` exchange
 when you only want to verify the Bonjour control plane.
 
+For a repeatable two-host Bonjour proof, use the harness:
+
+```sh
+REMOTE_READY_TIMEOUT=30 \
+PROFILES="lan thunderbolt awdl" \
+PHASES="signal full" \
+SSH_TARGET=tmc2@10.0.18.249 \
+OUTPUT=/tmp/awdl-webrtc-bonjour.txt \
+scripts/remote-bonjour.sh
+```
+
+The harness uses SSH only to copy and launch the peer binary. The WebRTC signal
+itself is exchanged through Bonjour/TCP. See
+[docs/bonjour-two-host.md](docs/bonjour-two-host.md) for passing criteria and
+the current blocked reachability evidence.
+
 The `offer-ssh` mode runs the local side, starts `answer-stdio` on a peer over
 SSH, exchanges SDP plus optional explicit ICE candidates over stdin/stdout, and
 waits for a WebRTC datachannel `ping`/`pong`:
