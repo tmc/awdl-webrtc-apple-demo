@@ -56,10 +56,44 @@ These tests cover the selection rule. They do not replace the two-live-Mac UI
 proof, because they do not render the SwiftUI window or exercise a real cable
 removal.
 
+## Live UI Active-Path Check - 2026-05-19
+
+After fixing the collapsed text rows in `ui.go`, a local SwiftUI UI run was
+paired with a remote headless discover publisher on `tmc2@10.0.18.249`.
+
+Remote publisher:
+
+```sh
+/Volumes/Shared/awdl-webrtc-ui-proof-bin \
+  -mode discover -backend network -timeout 20m -ui-interval 2s
+```
+
+Local UI:
+
+```sh
+go run . -mode ui -backend network -ui-interval 2s -ui-count 20 -ui-window 4
+```
+
+Observed visible state:
+
+| UI area | Observation |
+| --- | --- |
+| Active path | `thunderbolt`, about 18-25 Mbit/s, peer `MacBook-m4small.local`. |
+| Possible paths | Thunderbolt `bridge0`, AWDL `awdl0`, and LAN `en0` all had local and peer endpoints from Bonjour/TXT discovery. |
+| Bandwidth history | Rows updated every two seconds with Thunderbolt samples, 0.0% loss, and millisecond RTTs. |
+| Status | `sampling thunderbolt`. |
+
+Rendering note: the bad layout came from using `Frame(width, 0)` on text cells.
+`tmc/swiftui` maps `Frame` directly to SwiftUI's fixed
+`.frame(width:height:)`, so height `0` collapses the row. The UI now uses
+explicit row heights, shortened endpoint text, and middle truncation for long
+addresses.
+
 ## Current State
 
 Peer availability is no longer the blocker: Bonjour signaling, live headless
-discovery, and selected-link soak all passed on two Macs. The remaining UI proof
-is a visual two-Mac run plus physical Thunderbolt removal, confirming that the
-visible active path moves from Thunderbolt to AWDL without restarting either
-process.
+discovery, and selected-link soak passed on two Macs. A local visible UI
+active-path check also passed while fed by a remote headless publisher. The
+remaining UI proof is a two-live-Mac visual run plus physical Thunderbolt
+removal, confirming that the visible active path moves from Thunderbolt to AWDL
+without restarting either process.
