@@ -33,6 +33,19 @@ cleanup_stale_processes=${CLEAN_STALE_PROCESSES:-1}
 lan_path_interface=${LAN_PATH_INTERFACE:-en0}
 awdl_path_interface=${AWDL_PATH_INTERFACE:-awdl0}
 thunderbolt_path_interface=${THUNDERBOLT_PATH_INTERFACE:-}
+use_discovery=${USE_DISCOVERY:-0}
+discovery_file=${DISCOVERY_FILE:-}
+discovery_peer=${DISCOVERY_PEER:-}
+discovery_timeout=${DISCOVERY_TIMEOUT:-20s}
+discovery_interval=${DISCOVERY_INTERVAL:-500ms}
+discovery_backend=${DISCOVERY_BACKEND:-network}
+discovery_publish_timeout=${DISCOVERY_PUBLISH_TIMEOUT:-60s}
+discovery_probe=${DISCOVERY_PROBE:-1}
+discovery_lan_peer=
+discovery_thunderbolt_peer=
+discovery_awdl_peer=
+remote_discovery_pid=
+remote_discovery_log=
 output=${OUTPUT:-}
 
 if [[ -n $output ]]; then
@@ -91,6 +104,85 @@ run() {
 	"$@"
 }
 
+truthy() {
+	case "${1:-}" in
+	1 | true | TRUE | yes | YES | on | ON)
+		return 0
+		;;
+	esac
+	return 1
+}
+
+discovery_requested() {
+	[[ -n $discovery_file ]] || truthy "$use_discovery"
+}
+
+runtime_discovery_requested() {
+	[[ -z $discovery_file ]] && truthy "$use_discovery"
+}
+
+require_jq() {
+	if ! command -v jq >/dev/null 2>&1; then
+		printf 'jq is required when USE_DISCOVERY=1 or DISCOVERY_FILE is set\n' >&2
+		exit 2
+	fi
+}
+
+read_discovery_json() {
+	if [[ -n $discovery_file ]]; then
+		cat "$discovery_file"
+		return
+	fi
+	"$local_bin" -mode discover-wait -backend "$discovery_backend" -discover-peer "$discovery_peer" -timeout "$discovery_timeout" -ui-interval "$discovery_interval"
+}
+
+discovery_addr() {
+	local profile=$1
+	jq -r -s --arg profile "$profile" '
+		map(select(.kind == "link_health_discovery" and ((.peer.addrs[$profile] // "") != ""))) |
+		last |
+		if . == null then "" else .peer.addrs[$profile] end
+	'
+}
+
+load_discovery_peers() {
+	discovery_requested || return
+	require_jq
+
+	local json
+	json=$(read_discovery_json)
+	printf '## discovery peer record\n'
+	printf '%s\n' "$json"
+	discovery_lan_peer=$(printf '%s\n' "$json" | discovery_addr lan)
+	discovery_thunderbolt_peer=$(printf '%s\n' "$json" | discovery_addr thunderbolt)
+	discovery_awdl_peer=$(printf '%s\n' "$json" | discovery_addr awdl)
+	printf 'discovery_lan_peer=%s\n' "$discovery_lan_peer"
+	printf 'discovery_thunderbolt_peer=%s\n' "$discovery_thunderbolt_peer"
+	printf 'discovery_awdl_peer=%s\n' "$discovery_awdl_peer"
+}
+
+start_remote_discovery() {
+	runtime_discovery_requested || return
+	remote_discovery_log=$(mktemp)
+	printf '## start remote discovery publisher\n'
+	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" \
+		"$(sq "$remote_bin") -mode discover -backend $(sq "$discovery_backend") -timeout $(sq "$discovery_publish_timeout") -ui-interval $(sq "$discovery_interval")" \
+		>"$remote_discovery_log" 2>&1 &
+	remote_discovery_pid=$!
+}
+
+cleanup_remote_discovery() {
+	if [[ -n $remote_discovery_pid ]]; then
+		kill "$remote_discovery_pid" 2>/dev/null || true
+		wait "$remote_discovery_pid" 2>/dev/null || true
+	fi
+	if [[ -n $remote_discovery_log ]]; then
+		printf '## remote discovery log\n'
+		cat "$remote_discovery_log"
+		rm -f "$remote_discovery_log"
+	fi
+}
+
 run_diag() {
 	printf '+'
 	printf ' %q' "$@"
@@ -132,6 +224,7 @@ cleanup_matrix_processes() {
 cleanup_on_exit() {
 	local rc=$?
 	cleanup_matrix_processes
+	cleanup_remote_discovery
 	exit "$rc"
 }
 
@@ -373,6 +466,35 @@ append_local_path_args() {
 		local_args+=(-require-path-interface "$iface")
 	fi
 	local_args+=(-forbid-loopback-path)
+}
+
+discovery_peer_for_profile() {
+	case "$1" in
+	lan)
+		printf '%s\n' "$discovery_lan_peer"
+		;;
+	thunderbolt)
+		printf '%s\n' "$discovery_thunderbolt_peer"
+		;;
+	awdl)
+		printf '%s\n' "$discovery_awdl_peer"
+		;;
+	*)
+		printf '\n'
+		;;
+	esac
+}
+
+run_discovery_local_sender() {
+	local profile=$1
+	local peer
+	peer=$(discovery_peer_for_profile "$profile")
+	if [[ -z $peer ]]; then
+		printf 'missing discovery address for profile %s\n' "$profile" >&2
+		return 2
+	fi
+	diagnose_local_udp_path "$profile discovery local sender" "$peer"
+	local_send "$profile" "$peer"
 }
 
 remote_send() {
@@ -733,9 +855,21 @@ printf 'cleanup_stale_processes=%s\n' "$cleanup_stale_processes"
 printf 'lan_path_interface=%s\n' "$lan_path_interface"
 printf 'awdl_path_interface=%s\n' "$awdl_path_interface"
 printf 'thunderbolt_path_interface=%s\n' "$thunderbolt_path_interface"
+printf 'use_discovery=%s\n' "$use_discovery"
+printf 'discovery_file=%s\n' "$discovery_file"
+printf 'discovery_peer=%s\n' "$discovery_peer"
+printf 'discovery_timeout=%s\n' "$discovery_timeout"
+printf 'discovery_interval=%s\n' "$discovery_interval"
+printf 'discovery_backend=%s\n' "$discovery_backend"
+printf 'discovery_publish_timeout=%s\n' "$discovery_publish_timeout"
+printf 'discovery_probe=%s\n' "$discovery_probe"
 printf 'local_bin=%s\n' "$local_bin"
 printf 'remote_bin=%s\n' "$remote_bin"
 printf 'output=%s\n' "$output"
+
+if [[ -n $discovery_file ]]; then
+	load_discovery_peers
+fi
 
 diagnose_local_reachability
 
@@ -758,7 +892,16 @@ printf '## install remote binary\n'
 run scp -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$local_bin" "$ssh_target:$remote_bin"
 remote "chmod +x $(sq "$remote_bin") && $(sq "$remote_bin") -mode check -profile lan -backend network$(remote_network_args) -timeout 3s >/dev/null"
 
+if runtime_discovery_requested; then
+	start_remote_discovery
+	load_discovery_peers
+fi
+
 for profile in $profiles; do
+	if discovery_requested && truthy "$discovery_probe"; then
+		printf '## %s discovery UDP perf\n' "$profile"
+		record_matrix_step "$profile discovery local-to-remote UDP perf" run_discovery_local_sender "$profile"
+	fi
 	printf '## %s Pion transport.Net WebRTC\n' "$profile"
 	record_matrix_step "$profile Pion transport.Net WebRTC" run_webrtc_offer_ssh "$profile"
 
