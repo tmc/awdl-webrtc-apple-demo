@@ -84,7 +84,8 @@ GOWORK=off go run . -mode discover -backend network -timeout 10s -ui-interval 1s
 ```
 
 It prints JSON records with the local Thunderbolt, AWDL, and LAN listener
-addresses plus the newest discovered peer metadata. This mode is useful for
+addresses plus the newest discovered peer metadata, including advertised
+version, commit, and supported modes when available. This mode is useful for
 checking whether both Macs can see each other before running the UI or the
 manual WebRTC signaling flow.
 

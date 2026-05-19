@@ -32,7 +32,7 @@ Useful demo changes:
 - `-mode discover` now publishes and browses the same Network.framework
   Bonjour/TXT metadata as the SwiftUI monitor and prints JSON records with
   local Thunderbolt, AWDL, and LAN listener addresses plus the newest peer.
-  The remaining enhancement is adding version/git metadata to that TXT record.
+  TXT metadata includes version, commit, and supported modes when available.
 - `-mode discover-wait` waits for the newest peer or a peer matched by id, name,
   or Bonjour service name, prints one JSON record on stdout, and exits.
 - Teach `remote-matrix.sh` to optionally use discovery output instead of hard-
