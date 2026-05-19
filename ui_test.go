@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -179,5 +180,73 @@ func TestLinkHealthPerfError(t *testing.T) {
 	}
 	if got := linkHealthPerfError(udpPerfRecord{Count: 20, Datagrams: 1}); got != "" {
 		t.Fatalf("linkHealthPerfError(partial success) = %q, want empty", got)
+	}
+}
+
+func TestLinkHealthSamplePreferredFallsBackToAWDL(t *testing.T) {
+	agent := newLinkHealthAgent(linkHealthConfig{})
+	agent.endpoints = map[string]*linkHealthEndpoint{
+		"thunderbolt": {profile: linkProfile{Name: "thunderbolt"}},
+		"awdl":        {profile: linkProfile{Name: "awdl"}},
+		"lan":         {profile: linkProfile{Name: "lan"}},
+	}
+	var sampled []string
+	agent.sampleLink = func(_ context.Context, endpoint *linkHealthEndpoint, peer linkHealthPeer, remote string) linkHealthSample {
+		sampled = append(sampled, endpoint.profile.Name+"="+remote)
+		switch endpoint.profile.Name {
+		case "thunderbolt":
+			return linkHealthSample{Profile: "thunderbolt", Peer: peer.Name, Error: "no replies"}
+		case "awdl":
+			return linkHealthSample{Profile: "awdl", Peer: peer.Name, BitrateBPS: 25e6, Datagrams: 20}
+		default:
+			t.Fatalf("unexpected sample on %s", endpoint.profile.Name)
+			return linkHealthSample{}
+		}
+	}
+
+	sample := agent.samplePreferred(context.Background(), linkHealthPeer{
+		Name: "peer",
+		Addrs: map[string]string{
+			"thunderbolt": "169.254.88.35:1234",
+			"awdl":        "[fe80::1%awdl0]:1234",
+			"lan":         "10.0.18.249:1234",
+		},
+	})
+	if sample.Profile != "awdl" || sample.Error != "" {
+		t.Fatalf("sample = %#v, want awdl success", sample)
+	}
+	if len(sampled) != 2 || sampled[0] != "thunderbolt=169.254.88.35:1234" || sampled[1] != "awdl=[fe80::1%awdl0]:1234" {
+		t.Fatalf("sampled = %#v", sampled)
+	}
+	if got := agent.lastSamples["thunderbolt"].Error; got != "no replies" {
+		t.Fatalf("thunderbolt remembered error = %q, want no replies", got)
+	}
+}
+
+func TestLinkHealthSamplePreferredSkipsUnavailableThunderbolt(t *testing.T) {
+	agent := newLinkHealthAgent(linkHealthConfig{})
+	agent.endpoints = map[string]*linkHealthEndpoint{
+		"thunderbolt": {profile: linkProfile{Name: "thunderbolt"}, err: "no address"},
+		"awdl":        {profile: linkProfile{Name: "awdl"}},
+	}
+	agent.sampleLink = func(_ context.Context, endpoint *linkHealthEndpoint, peer linkHealthPeer, remote string) linkHealthSample {
+		if endpoint.profile.Name != "awdl" {
+			t.Fatalf("unexpected sample on %s", endpoint.profile.Name)
+		}
+		return linkHealthSample{Profile: "awdl", Peer: peer.Name, BitrateBPS: 20e6, Datagrams: 20}
+	}
+
+	sample := agent.samplePreferred(context.Background(), linkHealthPeer{
+		Name: "peer",
+		Addrs: map[string]string{
+			"thunderbolt": "169.254.88.35:1234",
+			"awdl":        "[fe80::1%awdl0]:1234",
+		},
+	})
+	if sample.Profile != "awdl" || sample.Error != "" {
+		t.Fatalf("sample = %#v, want awdl success", sample)
+	}
+	if got := agent.lastSamples["thunderbolt"].Error; got != "local unavailable" {
+		t.Fatalf("thunderbolt remembered error = %q, want local unavailable", got)
 	}
 }

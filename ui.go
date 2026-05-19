@@ -118,6 +118,7 @@ type linkHealthAgent struct {
 	advertised  string
 	lastSamples map[string]linkHealthSample
 	samples     []linkHealthSample
+	sampleLink  func(context.Context, *linkHealthEndpoint, linkHealthPeer, string) linkHealthSample
 }
 
 func runLinkHealthUI(ctx context.Context, cfg linkHealthConfig) error {
@@ -699,13 +700,20 @@ func (a *linkHealthAgent) samplePreferred(ctx context.Context, peer linkHealthPe
 			a.remember(linkHealthSample{Time: time.Now(), Profile: name, Peer: peer.Name, Error: "local unavailable"})
 			continue
 		}
-		sample := a.sample(ctx, endpoint, peer, remote)
+		sample := a.sampleEndpoint(ctx, endpoint, peer, remote)
 		if sample.Error == "" {
 			return sample
 		}
 		a.remember(sample)
 	}
 	return linkHealthSample{Time: time.Now(), Peer: peer.Name, Error: "no shared path"}
+}
+
+func (a *linkHealthAgent) sampleEndpoint(ctx context.Context, endpoint *linkHealthEndpoint, peer linkHealthPeer, remote string) linkHealthSample {
+	if a.sampleLink != nil {
+		return a.sampleLink(ctx, endpoint, peer, remote)
+	}
+	return a.sample(ctx, endpoint, peer, remote)
 }
 
 func (a *linkHealthAgent) sample(ctx context.Context, endpoint *linkHealthEndpoint, peer linkHealthPeer, remote string) linkHealthSample {
