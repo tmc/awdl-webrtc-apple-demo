@@ -168,6 +168,7 @@ func main() {
 	discoverPeer := flag.String("discover-peer", "", "peer id, name, or service name for discover-wait; empty accepts the newest peer")
 	signalName := flag.String("signal-name", "", "Bonjour service name for answer-bonjour; default is a generated host/pid name")
 	signalPeer := flag.String("signal-peer", "", "Bonjour service name to dial for offer-bonjour")
+	signalOnly := flag.Bool("signal-only", false, "for Bonjour signaling modes, exit after exchanging WebRTC offer/answer without waiting for a datachannel")
 	flag.Parse()
 	pathPolicy := udpPathPolicy{
 		RequireInterface: strings.TrimSpace(*requirePathInterface),
@@ -289,11 +290,11 @@ func main() {
 		})
 	case "answer-bonjour":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return answerBonjour(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy, *signalName)
+			return answerBonjour(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy, *signalName, *signalOnly)
 		})
 	case "offer-bonjour":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
-			return offerBonjour(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy, *signalPeer)
+			return offerBonjour(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy, *signalPeer, *signalOnly)
 		})
 	case "offer-ssh":
 		runWithTimeout(*timeout, func(ctx context.Context) error {

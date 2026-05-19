@@ -45,7 +45,7 @@ type nwSignalPendingConn struct {
 	state <-chan string
 }
 
-func answerBonjour(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, usePionNet bool, mdnsMode ice.MulticastDNSMode, candidatePolicy candidatePolicyConfig, signalName string) error {
+func answerBonjour(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, usePionNet bool, mdnsMode ice.MulticastDNSMode, candidatePolicy candidatePolicyConfig, signalName string, signalOnly bool) error {
 	listener, err := newNWSignalListener(ctx, profile, signalName)
 	if err != nil {
 		return err
@@ -119,6 +119,11 @@ func answerBonjour(ctx context.Context, profile linkProfile, iface linkInterface
 		return err
 	}
 	fmt.Printf("ANSWER %s\n", encoded)
+	if signalOnly {
+		fmt.Printf("bonjour signal exchanged offer/answer as %s over %s\n", listener.name, iface.Name)
+		time.Sleep(200 * time.Millisecond)
+		return nil
+	}
 
 	select {
 	case got := <-received:
@@ -130,7 +135,7 @@ func answerBonjour(ctx context.Context, profile linkProfile, iface linkInterface
 	}
 }
 
-func offerBonjour(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, usePionNet bool, mdnsMode ice.MulticastDNSMode, candidatePolicy candidatePolicyConfig, signalPeer string) error {
+func offerBonjour(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, usePionNet bool, mdnsMode ice.MulticastDNSMode, candidatePolicy candidatePolicyConfig, signalPeer string, signalOnly bool) error {
 	if strings.TrimSpace(signalPeer) == "" {
 		return errors.New("missing -signal-peer for offer-bonjour")
 	}
@@ -197,6 +202,11 @@ func offerBonjour(ctx context.Context, profile linkProfile, iface linkInterface,
 	}
 	if err := setRemoteWireSignal(pc, answer, "answer"); err != nil {
 		return err
+	}
+	if signalOnly {
+		fmt.Printf("bonjour signal exchanged offer/answer with %s over %s\n", signalPeer, iface.Name)
+		time.Sleep(200 * time.Millisecond)
+		return nil
 	}
 	select {
 	case <-opened:
