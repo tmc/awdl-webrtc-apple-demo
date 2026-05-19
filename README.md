@@ -121,7 +121,29 @@ responses moved.
 The `pair` mode creates two local PeerConnections and exchanges a datachannel
 payload over the constrained interface. On this host, Thunderbolt Bridge pairing
 passes. AWDL same-host pairing is not useful because AWDL traffic is peer-link
-traffic; use `offer-ssh` against another Apple host.
+traffic; use `offer-stdio` or `offer-ssh` against another Apple host.
+
+The `offer-stdio` and `answer-stdio` modes use the same WebRTC wire signal as
+`offer-ssh`, but leave the control plane to the operator. This is useful when
+SSH to the peer is unavailable or when testing another discovery/signaling
+transport. Start the answer side on one Mac:
+
+```sh
+GOWORK=off go run . -profile awdl -backend network -pion-net -mdns disabled \
+  -candidate-policy auto -mode answer-stdio -timeout 90s
+```
+
+Start the offer side on the other Mac:
+
+```sh
+GOWORK=off go run . -profile awdl -backend network -pion-net -mdns disabled \
+  -candidate-policy auto -mode offer-stdio -timeout 90s
+```
+
+Move the printed `OFFER ...` line to the answer process, then move the printed
+`ANSWER ...` line back to the offer process. The datachannel exchange then runs
+over the selected LAN, Thunderbolt, or AWDL ICE path, independent of how the two
+signal lines were transported.
 
 The `offer-ssh` mode runs the local side, starts `answer-stdio` on a peer over
 SSH, exchanges SDP plus optional explicit ICE candidates over stdin/stdout, and
