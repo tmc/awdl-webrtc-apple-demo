@@ -5,6 +5,35 @@ that feeds it. The UI should show all possible local and peer paths, prefer
 Thunderbolt when it completes, and fall back to AWDL when Thunderbolt is removed
 or stops replying.
 
+## One-Command Harness
+
+Use the harness to build the current workspace binary, install it on the remote
+Mac, start the remote headless discovery publisher, run a local discovery
+preflight, and then launch the local SwiftUI monitor:
+
+```sh
+SSH_TARGET=tmc2@10.0.18.249 OUTPUT=/tmp/awdl-webrtc-ui-harness.txt \
+  scripts/run-ui-harness.sh
+```
+
+Useful knobs:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SSH_TARGET` | `tmc2@10.0.18.249` | Remote Mac used for the headless discovery publisher. |
+| `REMOTE_BIN` | `/Volumes/Shared/awdl-webrtc-ui-harness-bin` | Remote install path for the built binary. |
+| `REMOTE_PUBLISH_TIMEOUT` | `2h` | Keeps the remote publisher alive long enough for manual testing. |
+| `UI_INTERVAL` | `2s` | SwiftUI link-health sample interval. |
+| `UI_COUNT` | `20` | Datagrams per UI sample. |
+| `UI_WINDOW` | `4` | In-flight datagram window per UI sample. |
+| `PREFLIGHT_DISCOVERY` | `1` | Runs `discover-wait` locally before opening the UI. |
+| `OUTPUT` | empty | Captures the harness transcript with `tee`. |
+| `REMOTE_LOG` | temp file | Optional persistent path for the remote discovery log. |
+
+The harness prints the physical validation steps before opening the UI. Closing
+the SwiftUI window or pressing Ctrl-C tears down the remote publisher and prints
+the remote discovery log.
+
 ## Manual UI Run
 
 Run this on both Macs:
@@ -94,6 +123,7 @@ addresses.
 Peer availability is no longer the blocker: Bonjour signaling, live headless
 discovery, and selected-link soak passed on two Macs. A local visible UI
 active-path check also passed while fed by a remote headless publisher. The
-remaining UI proof is a two-live-Mac visual run plus physical Thunderbolt
-removal, confirming that the visible active path moves from Thunderbolt to AWDL
-without restarting either process.
+new harness makes the final proof repeatable, but it does not replace the human
+observation. The remaining UI proof is a two-live-Mac visual run plus physical
+Thunderbolt removal, confirming that the visible active path moves from
+Thunderbolt to AWDL without restarting either process.

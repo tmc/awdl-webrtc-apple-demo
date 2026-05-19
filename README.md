@@ -78,8 +78,10 @@ Thunderbolt, AWDL, and LAN when those paths are available, and samples the peer
 in that order. A Thunderbolt path with no replies is marked unavailable for
 that sample and the monitor immediately tries AWDL, then LAN. The checked-in
 `go.work` file intentionally resolves the local sibling Apple bindings.
-See [docs/ui-two-host.md](docs/ui-two-host.md) for the two-live-Mac validation
-steps and the local fallback-test coverage.
+Use [scripts/run-ui-harness.sh](scripts/run-ui-harness.sh) to launch a remote
+headless publisher plus the local UI for the physical cable-removal proof. See
+[docs/ui-two-host.md](docs/ui-two-host.md) for the two-live-Mac validation steps
+and the local fallback-test coverage.
 
 For a terminal-friendly view of the same Bonjour/TXT discovery data, use
 `discover` mode:
