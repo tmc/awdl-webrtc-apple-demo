@@ -8,10 +8,10 @@ do not complete requirements that need a fresh two-host run.
 
 | Gate | Current result |
 | --- | --- |
-| Release preflight | PASS: `scripts/release-preflight.sh` passes; use `GITHUB_RESOLVE_IP=140.82.116.3` when local DNS cannot resolve GitHub. |
+| Release preflight | PASS: `GITHUB_RESOLVE_IP=140.82.116.3 scripts/release-preflight.sh` passed on 2026-05-19; use `GITHUB_RESOLVE_IP` when local DNS cannot resolve GitHub. |
 | Published modules | PASS: the demo resolves `github.com/tmc/apple v0.6.7` and `github.com/tmc/apple-pion v0.1.3` from the module cache with no local replace. |
 | Published repos | PASS: demo and `apple-pion` HEADs are published at `origin/main`; `apple-pion` is tagged `v0.1.3`. |
-| Remote reachability | BLOCKED: the most recent `ssh -o ConnectTimeout=3 -o BatchMode=yes tmc2@10.0.18.249 true` check timed out on port 22. `REMOTE_READY_TIMEOUT` can now wait for SSH before matrix setup, but the two-host trace run still needs the peer reachable. |
+| Remote reachability | BLOCKED: the 2026-05-19 retry reached the host only intermittently by ICMP, while `ssh -o BatchMode=yes -o ConnectTimeout=20 ... tmc2@10.0.18.249` and `nc -vz -G 5 10.0.18.249 22` both timed out on TCP/22. `REMOTE_READY_TIMEOUT` can now wait for SSH before matrix setup, but the two-host trace run still needs the peer reachable. |
 | Remote matrix | PARTIAL: `CANDIDATE_POLICY=auto REQUIRE_PATHS=1 SSH_TARGET=tmc2@10.0.18.249 REMOTE_BIN=/Volumes/Shared/awdl-webrtc-apple-demo-bin OUTPUT=/tmp/awdl-webrtc-matrix-v011.txt SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-v011.md scripts/remote-matrix-bundle.sh` completed all probes and failed only `awdl Pion transport.Net WebRTC`. LAN and Thunderbolt Pion-native WebRTC passed; LAN/Thunderbolt/AWDL raw Network.framework UDP perf, latency, and callback probes passed with path evidence. |
 
 ## Requirement Checklist
