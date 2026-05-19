@@ -27,12 +27,16 @@ Default settings:
 | `WEBRTC_ATTEMPTS` | `3` |
 | `REMOTE_READY_TIMEOUT` | `60` |
 | `REMOTE_STEP_READY_TIMEOUT` | `30` |
+| `DISCOVERY_PUBLISH_TIMEOUT` | `2h` |
+| `DISCOVERY_PUBLISH_INTERVAL` | `5s` |
 
 The wrapper writes a raw transcript and Markdown summary using a timestamped
 name under `/tmp` unless `OUTPUT` and `SUMMARY_OUTPUT` are set explicitly.
 It passes through matrix options such as `USE_DISCOVERY=1`, `DISCOVERY_PEER`,
 and `DISCOVERY_FILE` when you want discovery-fed peer addresses in the soak
-transcript.
+transcript. Runtime discovery keeps the remote publisher alive until matrix
+cleanup by default, so long discovery-fed probes do not expire advertised
+listener ports mid-run.
 
 ## Passing Criteria
 
@@ -47,14 +51,21 @@ transcript.
 
 ## Current State
 
-The wrapper was syntax-checked and exercised with a short remote-readiness
-timeout on 2026-05-19. Because `tmc2@10.0.18.249` was unreachable, it stopped at
-the reachability gate and wrote:
+The long selected-link soak passed for LAN, Thunderbolt, and AWDL on
+2026-05-19. The run is summarized in
+[soak-live-20260519.md](soak-live-20260519.md) and wrote:
 
 ```text
-/tmp/awdl-webrtc-dry-run-test.txt
-/tmp/awdl-webrtc-dry-run-test.md
+/tmp/awdl-webrtc-soak-live-20260519.txt
+/tmp/awdl-webrtc-soak-live-20260519.md
 ```
 
-No long-soak performance claim is made until the peer is reachable and the full
-default command passes.
+The same run exposed one discovery-fed probe failure: the old 60s remote
+discovery publisher timeout expired advertised listener ports during the long
+probe. `scripts/remote-matrix.sh` now defaults `DISCOVERY_PUBLISH_TIMEOUT=2h`,
+and a LAN-only 70s discovery-fed smoke passed with:
+
+```text
+/tmp/awdl-webrtc-discovery-lifetime-smoke-20260519.txt
+/tmp/awdl-webrtc-discovery-lifetime-smoke-20260519.md
+```

@@ -27,24 +27,30 @@ remote demo processes whose command line starts with the configured binary path.
 
 ## Current State
 
-The peer was not usable for harness control on 2026-05-19, so no two-host
-Bonjour proof was claimed. The blocked run is saved at:
+The two-host Bonjour proof passed on 2026-05-19 for LAN, Thunderbolt, and AWDL
+in both `signal` and `full` phases. The successful run is summarized in
+[bonjour-live-20260519.md](bonjour-live-20260519.md) and saved at:
 
 ```text
-/tmp/awdl-webrtc-bonjour-unreachable-20260519.txt
+/tmp/awdl-webrtc-bonjour-live2-20260519.txt
 ```
 
-Observed local diagnostics:
+Result:
 
-| Check | Result |
-| --- | --- |
-| Route to `10.0.18.249` | `en0`, with host down/no route during retries |
-| Ping | 100% packet loss |
-| TCP/22 | `Host is down` or `No route to host` |
-| SSH readiness | failed with exit 255 |
+| Profile | Signal-only | Full datachannel | Interface |
+| --- | --- | --- | --- |
+| LAN | PASS | PASS | `en0` |
+| Thunderbolt | PASS | PASS | `bridge0` |
+| AWDL | PASS | PASS | `awdl0` |
 
-A later fresh check reached `10.0.18.249` by ping, but TCP/22 returned
-`Connection refused`, so the SSH-controlled harness is still blocked.
+Final summary:
+
+```text
+bonjour passed profiles=lan thunderbolt awdl phases=signal full
+```
+
+Earlier unreachable/refused SSH-control runs remain historical control-plane
+diagnostics, not the current state.
 
 ## Passing Criteria
 

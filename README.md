@@ -209,7 +209,7 @@ scripts/remote-bonjour.sh
 The harness uses SSH only to copy and launch the peer binary. The WebRTC signal
 itself is exchanged through Bonjour/TCP. See
 [docs/bonjour-two-host.md](docs/bonjour-two-host.md) for passing criteria and
-the current blocked reachability evidence.
+the current LAN, Thunderbolt, and AWDL passing evidence.
 
 The `offer-ssh` mode runs the local side, starts `answer-stdio` on a peer over
 SSH, exchanges SDP plus optional explicit ICE candidates over stdin/stdout, and
@@ -333,7 +333,9 @@ address to probe differs from the SSH target host string. Set
 `discover-wait`, and add discovery-sourced local-to-remote UDP perf probes
 before the normal per-profile matrix. Set `DISCOVERY_FILE` to a saved
 `link_health_discovery` JSON record to test the parsing path without live
-Bonjour.
+Bonjour. Runtime discovery publishers default to
+`DISCOVERY_PUBLISH_TIMEOUT=2h` and `DISCOVERY_PUBLISH_INTERVAL=5s`, so long
+soak probes do not expire advertised listener ports before cleanup.
 
 For a published-module release gate, run:
 

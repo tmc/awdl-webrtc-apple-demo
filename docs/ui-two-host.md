@@ -35,6 +35,12 @@ Local smoke on 2026-05-19 passed: `discover-wait` found a local publisher with
 Thunderbolt, AWDL, and LAN listener addresses plus TXT metadata including
 `version`, `commit`, and `modes`.
 
+Live two-host discovery on 2026-05-19 also passed through the remote matrix:
+[discovery-matrix-20260519.md](discovery-matrix-20260519.md) records discovered
+LAN, Thunderbolt, and AWDL peer addresses and WebRTC datachannel success on all
+three profiles. That proves the headless discovery/control path used by the UI,
+but it does not replace visual observation of the SwiftUI window.
+
 ## Automated Coverage
 
 `TestLinkHealthSamplePreferredFallsBackToAWDL` and
@@ -52,5 +58,8 @@ removal.
 
 ## Current State
 
-The remote Mac was unreachable on 2026-05-19, so the two-live-Mac UI proof is
-still blocked on peer availability.
+Peer availability is no longer the blocker: Bonjour signaling, live headless
+discovery, and selected-link soak all passed on two Macs. The remaining UI proof
+is a visual two-Mac run plus physical Thunderbolt removal, confirming that the
+visible active path moves from Thunderbolt to AWDL without restarting either
+process.
