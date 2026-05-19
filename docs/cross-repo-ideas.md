@@ -29,8 +29,10 @@ rank assignment. WeightShare concurrently tries AWDL/NWBrowser discovery,
 
 Useful demo changes:
 
-- Add `-mode discover` that publishes the selected profile, interface, address,
-  git commit, and supported modes as TXT metadata.
+- `-mode discover` now publishes and browses the same Network.framework
+  Bonjour/TXT metadata as the SwiftUI monitor and prints JSON records with
+  local Thunderbolt, AWDL, and LAN listener addresses plus the newest peer.
+  The remaining enhancement is adding version/git metadata to that TXT record.
 - Add `-mode discover-wait` that waits for a named peer and prints a machine-
   readable peer record.
 - Teach `remote-matrix.sh` to optionally use discovery output instead of hard-

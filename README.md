@@ -76,6 +76,18 @@ that sample and the monitor immediately tries AWDL, then LAN. The monitor is
 intended to keep using the published `github.com/tmc/apple v0.6.7` bindings;
 `GOWORK=off` avoids accidentally resolving a sibling checkout.
 
+For a terminal-friendly view of the same Bonjour/TXT discovery data, use
+`discover` mode:
+
+```sh
+GOWORK=off go run . -mode discover -backend network -timeout 10s -ui-interval 1s
+```
+
+It prints JSON records with the local Thunderbolt, AWDL, and LAN listener
+addresses plus the newest discovered peer metadata. This mode is useful for
+checking whether both Macs can see each other before running the UI or the
+manual WebRTC signaling flow.
+
 The `-backend` flag selects `go` or `network`.
 
 - `go` uses ordinary Darwin UDP sockets. It is the stable throughput and
