@@ -281,6 +281,16 @@ SSH_TARGET=tmc2@10.0.18.249 \
   scripts/remote-diagnostics.sh
 ```
 
+If the peer is already advertising link-health discovery metadata, diagnostics
+can consume those addresses instead of hard-coded peer addresses:
+
+```sh
+USE_DISCOVERY=1 \
+DISCOVERY_PEER=peer-service-name \
+RUN_REMOTE=0 \
+scripts/remote-diagnostics.sh
+```
+
 The script records local reachability diagnostics for `SSH_TARGET`, checks SSH,
 then builds a temporary local binary, copies it to `REMOTE_BIN` on the peer, and
 runs LAN, Thunderbolt, and AWDL `-pion-net` WebRTC plus Network.framework UDP
@@ -318,7 +328,12 @@ instead of a fixed datagram count and listeners stop after
 `REQUIRE_PATHS=1` to add `-require-path-interface` and `-forbid-loopback-path`
 to sender runs; LAN defaults to `en0`, AWDL defaults to `awdl0`, and
 Thunderbolt uses `THUNDERBOLT_PATH_INTERFACE` when set. Set `SSH_HOST` when the
-address to probe differs from the SSH target host string.
+address to probe differs from the SSH target host string. Set
+`USE_DISCOVERY=1` to start a remote discovery publisher, wait for local
+`discover-wait`, and add discovery-sourced local-to-remote UDP perf probes
+before the normal per-profile matrix. Set `DISCOVERY_FILE` to a saved
+`link_health_discovery` JSON record to test the parsing path without live
+Bonjour.
 
 For a published-module release gate, run:
 

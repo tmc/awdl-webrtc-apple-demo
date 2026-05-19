@@ -35,8 +35,10 @@ Useful demo changes:
   TXT metadata includes version, commit, and supported modes when available.
 - `-mode discover-wait` waits for the newest peer or a peer matched by id, name,
   or Bonjour service name, prints one JSON record on stdout, and exits.
-- Teach `remote-matrix.sh` to optionally use discovery output instead of hard-
-  coded addresses for AWDL and Thunderbolt.
+- `remote-matrix.sh` and `remote-diagnostics.sh` now accept `DISCOVERY_FILE`
+  for saved JSON records and `USE_DISCOVERY=1` for live `discover-wait`
+  integration. The matrix can add discovery-sourced local-to-remote UDP perf
+  probes before the normal listener-driven steps.
 - Keep multicast out of the core WebRTC path; it is useful as a diagnostic
   fallback, not as proof of AWDL candidate handling.
 
@@ -91,5 +93,5 @@ inconsistent with the requested profile.
 2. Validate the SwiftUI monitor on two live Macs while removing Thunderbolt to
    observe fallback to AWDL.
 3. Run longer fixed-duration, multi-stream, and latency-only remote sweeps.
-4. Teach `remote-matrix.sh` to optionally use discovery output instead of hard-
-   coded addresses for AWDL and Thunderbolt.
+4. Use the discovery-fed matrix mode on two live Macs and compare it with the
+   listener-driven matrix output.

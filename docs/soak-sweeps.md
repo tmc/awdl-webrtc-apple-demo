@@ -30,6 +30,9 @@ Default settings:
 
 The wrapper writes a raw transcript and Markdown summary using a timestamped
 name under `/tmp` unless `OUTPUT` and `SUMMARY_OUTPUT` are set explicitly.
+It passes through matrix options such as `USE_DISCOVERY=1`, `DISCOVERY_PEER`,
+and `DISCOVERY_FILE` when you want discovery-fed peer addresses in the soak
+transcript.
 
 ## Passing Criteria
 
