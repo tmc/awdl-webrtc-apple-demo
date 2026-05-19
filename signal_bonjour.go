@@ -7,18 +7,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 	"github.com/tmc/apple/dispatch"
+	"github.com/tmc/apple/foundation"
 	applenetwork "github.com/tmc/apple/network"
 	"github.com/tmc/apple/objc"
 	"github.com/tmc/apple/objectivec"
 )
 
-const webRTCSignalServiceType = "_awdl-webrtc-signal._tcp"
+const (
+	webRTCSignalServiceType = "_awdl-webrtc-signal._tcp"
+	nwSignalDialAttempt     = 4 * time.Second
+)
 
 type nwSignalListener struct {
 	name     string
@@ -301,7 +307,32 @@ func dialNWSignal(ctx context.Context, profile linkProfile, serviceName string) 
 		return nil, fmt.Errorf("signal dial %q: nil connection", serviceName)
 	}
 	pending := startPendingNWSignalConn(conn, dispatch.QueueCreate("awdl-webrtc.signal.dial"))
-	return waitNWSignalConn(ctx, pending)
+	attemptCtx, cancel := signalDialAttemptContext(ctx)
+	signal, err := waitNWSignalConn(attemptCtx, pending)
+	cancel()
+	if err == nil {
+		return signal, nil
+	}
+	directErr := err
+
+	host, port, err := resolveNWSignalHostPort(ctx, profile, serviceName)
+	if err != nil {
+		return nil, fmt.Errorf("signal dial %q via bonjour endpoint: %w; resolve host endpoint: %w", serviceName, directErr, err)
+	}
+	hostEndpoint := applenetwork.NWEndpointCreateHost(host, port)
+	if hostEndpoint.ID == 0 {
+		return nil, fmt.Errorf("signal dial %q host %s:%s: nil endpoint", serviceName, host, port)
+	}
+	hostConn := applenetwork.NWConnectionCreate(hostEndpoint, signalTCPParams(profile))
+	if hostConn.ID == 0 {
+		return nil, fmt.Errorf("signal dial %q host %s:%s: nil connection", serviceName, host, port)
+	}
+	pending = startPendingNWSignalConn(hostConn, dispatch.QueueCreate("awdl-webrtc.signal.dial.host"))
+	signal, err = waitNWSignalConn(ctx, pending)
+	if err != nil {
+		return nil, fmt.Errorf("signal dial %q via bonjour endpoint: %w; host endpoint %s:%s: %w", serviceName, directErr, host, port, err)
+	}
+	return signal, nil
 }
 
 func browseNWSignalEndpoint(ctx context.Context, profile linkProfile, serviceName string) (applenetwork.NWEndpoint, error) {
@@ -370,6 +401,75 @@ func signalTCPParams(profile linkProfile) applenetwork.NWParameters {
 		linkHealthSetPrivateBool(params, "setUseP2P:", true)
 	}
 	return params
+}
+
+func signalDialAttemptContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := nwSignalDialAttempt
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining < timeout {
+			timeout = remaining
+		}
+	}
+	if timeout <= 0 {
+		timeout = time.Nanosecond
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+func resolveNWSignalHostPort(ctx context.Context, profile linkProfile, serviceName string) (string, string, error) {
+	service := foundation.NewNetServiceWithDomainTypeName(linkHealthDomain, webRTCSignalServiceType, serviceName)
+	if service.ID == 0 {
+		return "", "", fmt.Errorf("resolve bonjour signal %q: nil service", serviceName)
+	}
+	service.SetIncludesPeerToPeer(profile.IncludePeerToPeer || profile.UseAWDL || profile.UseP2P)
+
+	type result struct {
+		host string
+		port string
+		err  error
+	}
+	done := make(chan result, 1)
+	delegate := foundation.NewNSNetServiceDelegate(foundation.NSNetServiceDelegateConfig{
+		NetServiceDidResolveAddress: func(sender foundation.NSNetService) {
+			host := strings.TrimSpace(sender.HostName())
+			port := sender.Port()
+			if host == "" || port <= 0 {
+				done <- result{err: fmt.Errorf("resolved empty host or port: host=%q port=%d", host, port)}
+				return
+			}
+			done <- result{host: host, port: strconv.Itoa(port)}
+		},
+	})
+	service.SetDelegate(delegate)
+	resolveTimeout := nwSignalDialAttempt.Seconds()
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline).Seconds()
+		if remaining < resolveTimeout {
+			resolveTimeout = remaining
+		}
+	}
+	if resolveTimeout <= 0 {
+		resolveTimeout = 0.001
+	}
+	objc.Send[struct{}](service.ID, objc.Sel("resolveWithTimeout:"), resolveTimeout)
+	defer objc.Send[struct{}](service.ID, objc.Sel("stop"))
+
+	loop := foundation.GetRunLoopClass().CurrentRunLoop()
+	for {
+		select {
+		case got := <-done:
+			runtime.KeepAlive(delegate)
+			runtime.KeepAlive(service)
+			return got.host, got.port, got.err
+		case <-ctx.Done():
+			runtime.KeepAlive(delegate)
+			runtime.KeepAlive(service)
+			return "", "", fmt.Errorf("resolve bonjour signal %q: %w", serviceName, ctx.Err())
+		default:
+			loop.RunModeBeforeDate(foundation.RunLoopDefaultMode, foundation.NewDateWithTimeIntervalSinceNow(0.05))
+		}
+	}
 }
 
 func startPendingNWSignalConn(conn applenetwork.NWConnection, queue dispatch.Queue) nwSignalPendingConn {
