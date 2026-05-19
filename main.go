@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pion/ice/v4"
@@ -125,6 +126,8 @@ var networkConnect = networkConnectPolicy{
 	Retries: defaultNetworkConnectRetries,
 }
 
+var traceWebRTC bool
+
 func main() {
 	profileName := flag.String("profile", "awdl", "link profile: awdl, thunderbolt, or lan")
 	ifaceName := flag.String("iface", "", "network interface to constrain ICE candidates to; default depends on profile")
@@ -153,6 +156,7 @@ func main() {
 	forbidLoopbackPath := flag.Bool("forbid-loopback-path", false, "fail UDP perf if the Network.framework path uses loopback")
 	nwConnectTimeout := flag.Duration("nw-connect-timeout", defaultNetworkConnectTimeout, "Network.framework outbound readiness timeout before retry")
 	nwConnectRetries := flag.Int("nw-connect-retries", defaultNetworkConnectRetries, "Network.framework outbound readiness retry count")
+	webrtcTrace := flag.Bool("webrtc-trace", os.Getenv("AWDL_DEMO_WEBRTC_TRACE") != "", "print WebRTC ICE, peer connection, and data channel state transitions")
 	uiInterval := flag.Duration("ui-interval", 3*time.Second, "SwiftUI link monitor sample interval")
 	uiCount := flag.Int("ui-count", 20, "SwiftUI link monitor datagrams per sample")
 	uiWindow := flag.Int("ui-window", 4, "SwiftUI link monitor maximum in-flight datagrams per sample")
@@ -165,6 +169,7 @@ func main() {
 		Timeout: *nwConnectTimeout,
 		Retries: *nwConnectRetries,
 	}
+	traceWebRTC = *webrtcTrace
 	if err := validateNetworkConnectPolicy(networkConnect); err != nil {
 		fail(err)
 	}
@@ -248,7 +253,7 @@ func main() {
 
 	switch *mode {
 	case "check":
-		fmt.Printf("pion webrtc interface_filter=%s network_types=udp4,udp6 mdns=%s udp_backend=%s pion_net=%t\n", iface.Name, mdnsModeString(mdnsMode), backend, *pionNet)
+		fmt.Printf("pion webrtc interface_filter=%s network_types=udp4,udp6 mdns=%s udp_backend=%s pion_net=%t webrtc_trace=%t\n", iface.Name, mdnsModeString(mdnsMode), backend, *pionNet, traceWebRTC)
 	case "gather":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
 			return gather(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy)
@@ -621,9 +626,12 @@ func gather(ctx context.Context, profile linkProfile, iface linkInterface, backe
 		return err
 	}
 	defer pc.Close()
-	if _, err := pc.CreateDataChannel("link-check", nil); err != nil {
+	diag := newWebRTCDiagnostics("gather", pc)
+	dc, err := pc.CreateDataChannel("link-check", nil)
+	if err != nil {
 		return fmt.Errorf("create data channel: %w", err)
 	}
+	diag.setDataChannel("local:link-check", dc)
 	offer, err := pc.CreateOffer(nil)
 	if err != nil {
 		return fmt.Errorf("create offer: %w", err)
@@ -635,7 +643,7 @@ func gather(ctx context.Context, profile linkProfile, iface linkInterface, backe
 	select {
 	case <-complete:
 	case <-ctx.Done():
-		return fmt.Errorf("gather %s candidates: %w", iface.Name, ctx.Err())
+		return fmt.Errorf("gather %s candidates: %w; %s", iface.Name, ctx.Err(), diag.snapshot())
 	}
 	desc := pc.LocalDescription()
 	if desc == nil {
@@ -678,15 +686,28 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 		return err
 	}
 	defer left.Close()
+	leftDiag := newWebRTCDiagnostics("left", left)
 	right, err := newPeer(iface, rightLink, mdnsMode, candidatePolicy.Policy)
 	if err != nil {
 		return err
 	}
 	defer right.Close()
+	rightDiag := newWebRTCDiagnostics("right", right)
 
 	opened := make(chan struct{})
 	received := make(chan string, 1)
 	right.OnDataChannel(func(dc *webrtc.DataChannel) {
+		name := "remote:" + dc.Label()
+		rightDiag.setDataChannel(name, dc)
+		dc.OnOpen(func() {
+			rightDiag.dataChannelState(name, "open")
+		})
+		dc.OnClose(func() {
+			rightDiag.dataChannelState(name, "closed")
+		})
+		dc.OnError(func(err error) {
+			rightDiag.dataChannelError(name, err)
+		})
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			received <- string(msg.Data)
 			_ = dc.SendText("pong")
@@ -696,9 +717,17 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 	if err != nil {
 		return fmt.Errorf("create data channel: %w", err)
 	}
+	leftDiag.setDataChannel("local:link-pair", dc)
 	dc.OnOpen(func() {
+		leftDiag.dataChannelState("local:link-pair", "open")
 		close(opened)
 		_ = dc.SendText("ping")
+	})
+	dc.OnClose(func() {
+		leftDiag.dataChannelState("local:link-pair", "closed")
+	})
+	dc.OnError(func(err error) {
+		leftDiag.dataChannelError("local:link-pair", err)
 	})
 
 	if err := signalNonTrickle(left, right, ctx, signalOptions{
@@ -711,7 +740,7 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 	select {
 	case <-opened:
 	case <-ctx.Done():
-		return fmt.Errorf("wait for data channel open over %s: %w", iface.Name, ctx.Err())
+		return fmt.Errorf("wait for data channel open over %s: %w; left %s; right %s", iface.Name, ctx.Err(), leftDiag.snapshot(), rightDiag.snapshot())
 	}
 	select {
 	case got := <-received:
@@ -721,7 +750,7 @@ func pair(ctx context.Context, profile linkProfile, iface linkInterface, backend
 		fmt.Printf("webrtc datachannel opened and exchanged payload over %s-constrained ICE\n", iface.Name)
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("wait for datachannel message over %s: %w", iface.Name, ctx.Err())
+		return fmt.Errorf("wait for datachannel message over %s: %w; left %s; right %s", iface.Name, ctx.Err(), leftDiag.snapshot(), rightDiag.snapshot())
 	}
 }
 
@@ -738,9 +767,21 @@ func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, 
 		return err
 	}
 	defer pc.Close()
+	diag := newWebRTCDiagnostics("answer", pc)
 
 	received := make(chan string, 1)
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
+		name := "remote:" + dc.Label()
+		diag.setDataChannel(name, dc)
+		dc.OnOpen(func() {
+			diag.dataChannelState(name, "open")
+		})
+		dc.OnClose(func() {
+			diag.dataChannelState(name, "closed")
+		})
+		dc.OnError(func(err error) {
+			diag.dataChannelError(name, err)
+		})
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			received <- string(msg.Data)
 			_ = dc.SendText("pong")
@@ -777,7 +818,7 @@ func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, 
 		time.Sleep(500 * time.Millisecond)
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("wait for answer datachannel message over %s: %w", iface.Name, ctx.Err())
+		return fmt.Errorf("wait for answer datachannel message over %s: %w; %s", iface.Name, ctx.Err(), diag.snapshot())
 	}
 }
 
@@ -797,6 +838,7 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 		return err
 	}
 	defer pc.Close()
+	diag := newWebRTCDiagnostics("offer", pc)
 
 	opened := make(chan struct{})
 	received := make(chan string, 1)
@@ -804,9 +846,17 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 	if err != nil {
 		return fmt.Errorf("create data channel: %w", err)
 	}
+	diag.setDataChannel("local:link-ssh", dc)
 	dc.OnOpen(func() {
+		diag.dataChannelState("local:link-ssh", "open")
 		close(opened)
 		_ = dc.SendText("ping")
+	})
+	dc.OnClose(func() {
+		diag.dataChannelState("local:link-ssh", "closed")
+	})
+	dc.OnError(func(err error) {
+		diag.dataChannelError("local:link-ssh", err)
 	})
 	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 		received <- string(msg.Data)
@@ -849,6 +899,9 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 	if usePionNet {
 		cmdArgs = append(cmdArgs, "-pion-net")
 	}
+	if traceWebRTC {
+		cmdArgs = append(cmdArgs, "-webrtc-trace")
+	}
 	cmd := exec.CommandContext(ctx, "ssh", cmdArgs...)
 	cmd.Stderr = os.Stderr
 	stdin, err := cmd.StdinPipe()
@@ -890,7 +943,7 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 	select {
 	case <-opened:
 	case <-ctx.Done():
-		return fmt.Errorf("wait for data channel open over %s: %w", iface.Name, ctx.Err())
+		return fmt.Errorf("wait for data channel open over %s: %w; %s", iface.Name, ctx.Err(), diag.snapshot())
 	}
 	select {
 	case got := <-received:
@@ -899,7 +952,7 @@ func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, bac
 		}
 		fmt.Printf("webrtc datachannel opened and exchanged payload with %s over %s-constrained ICE\n", sshTarget, iface.Name)
 	case <-ctx.Done():
-		return fmt.Errorf("wait for datachannel pong over %s: %w", iface.Name, ctx.Err())
+		return fmt.Errorf("wait for datachannel pong over %s: %w; %s", iface.Name, ctx.Err(), diag.snapshot())
 	}
 	select {
 	case err := <-waitc:
@@ -2553,6 +2606,112 @@ func udpNetworkForPeer(peer string) (string, error) {
 		return "udp4", nil
 	}
 	return "udp6", nil
+}
+
+type webRTCDiagnostics struct {
+	label string
+	pc    *webrtc.PeerConnection
+
+	mu              sync.Mutex
+	dataChannelName string
+	dataChannel     *webrtc.DataChannel
+	dataChannelErr  string
+}
+
+func newWebRTCDiagnostics(label string, pc *webrtc.PeerConnection) *webRTCDiagnostics {
+	d := &webRTCDiagnostics{label: label, pc: pc}
+	pc.OnSignalingStateChange(func(state webrtc.SignalingState) {
+		d.trace("signaling_state=%s", state)
+	})
+	pc.OnICEGatheringStateChange(func(state webrtc.ICEGatheringState) {
+		d.trace("ice_gathering_state=%s", state)
+	})
+	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		d.trace("ice_connection_state=%s", state)
+	})
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		d.trace("peer_connection_state=%s", state)
+	})
+	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			d.trace("local_candidate=end")
+			return
+		}
+		d.trace("local_candidate=%s", candidate.String())
+	})
+	return d
+}
+
+func (d *webRTCDiagnostics) setDataChannel(name string, dc *webrtc.DataChannel) {
+	if d == nil || dc == nil {
+		return
+	}
+	d.mu.Lock()
+	d.dataChannelName = name
+	d.dataChannel = dc
+	d.mu.Unlock()
+	d.trace("datachannel=%s state=%s", name, dc.ReadyState())
+}
+
+func (d *webRTCDiagnostics) dataChannelState(name, state string) {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	if name != "" {
+		d.dataChannelName = name
+	}
+	d.mu.Unlock()
+	d.trace("datachannel=%s state=%s", name, state)
+}
+
+func (d *webRTCDiagnostics) dataChannelError(name string, err error) {
+	if d == nil || err == nil {
+		return
+	}
+	d.mu.Lock()
+	d.dataChannelName = name
+	d.dataChannelErr = err.Error()
+	d.mu.Unlock()
+	d.trace("datachannel=%s error=%v", name, err)
+}
+
+func (d *webRTCDiagnostics) snapshot() string {
+	if d == nil || d.pc == nil {
+		return "webrtc_state=unavailable"
+	}
+	d.mu.Lock()
+	name := d.dataChannelName
+	dc := d.dataChannel
+	dcErr := d.dataChannelErr
+	d.mu.Unlock()
+	dcState := "-"
+	if dc != nil {
+		dcState = dc.ReadyState().String()
+	}
+	if name == "" {
+		name = "-"
+	}
+	if dcErr == "" {
+		dcErr = "-"
+	}
+	return fmt.Sprintf("webrtc_state label=%s signaling=%s ice_gathering=%s ice_connection=%s peer_connection=%s datachannel=%s:%s datachannel_error=%s",
+		d.label,
+		d.pc.SignalingState(),
+		d.pc.ICEGatheringState(),
+		d.pc.ICEConnectionState(),
+		d.pc.ConnectionState(),
+		name,
+		dcState,
+		dcErr,
+	)
+}
+
+func (d *webRTCDiagnostics) trace(format string, args ...any) {
+	if d == nil || !traceWebRTC {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "webrtctrace: %s "+format+"\n", append([]any{d.label}, args...)...)
 }
 
 func newPeer(iface linkInterface, link *linkWebRTCNet, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) (*webrtc.PeerConnection, error) {
