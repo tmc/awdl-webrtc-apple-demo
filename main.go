@@ -139,7 +139,7 @@ func main() {
 	backendName := flag.String("backend", string(udpBackendGo), "UDP backend: go or network")
 	pionNet := flag.Bool("pion-net", false, "use Network.framework as Pion transport.Net instead of ICE UDP mux")
 	mdnsName := flag.String("mdns", "query-and-gather", "ICE mDNS mode: query-and-gather, query-only, or disabled")
-	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-stdio, offer-ssh, discover, discover-wait, udp, udp-listen, udp-send, udp-callback-listen, udp-callback-request, udp-perf, udp-perf-listen, udp-perf-send, udp-latency, udp-latency-send, or ui")
+	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-stdio, answer-bonjour, offer-bonjour, offer-ssh, discover, discover-wait, udp, udp-listen, udp-send, udp-callback-listen, udp-callback-request, udp-perf, udp-perf-listen, udp-perf-send, udp-latency, udp-latency-send, or ui")
 	timeout := flag.Duration("timeout", 8*time.Second, "timeout for WebRTC and UDP modes")
 	peerAddr := flag.String("peer", "", "remote UDP address for udp-send, such as [fe80::1%awdl0]:12345")
 	sshTarget := flag.String("ssh", "", "ssh target for offer-ssh, such as tmc2@10.0.18.249")
@@ -166,6 +166,8 @@ func main() {
 	uiCount := flag.Int("ui-count", 20, "SwiftUI link monitor datagrams per sample")
 	uiWindow := flag.Int("ui-window", 4, "SwiftUI link monitor maximum in-flight datagrams per sample")
 	discoverPeer := flag.String("discover-peer", "", "peer id, name, or service name for discover-wait; empty accepts the newest peer")
+	signalName := flag.String("signal-name", "", "Bonjour service name for answer-bonjour; default is a generated host/pid name")
+	signalPeer := flag.String("signal-peer", "", "Bonjour service name to dial for offer-bonjour")
 	flag.Parse()
 	pathPolicy := udpPathPolicy{
 		RequireInterface: strings.TrimSpace(*requirePathInterface),
@@ -284,6 +286,14 @@ func main() {
 	case "offer-stdio":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
 			return offerStdio(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy)
+		})
+	case "answer-bonjour":
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return answerBonjour(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy, *signalName)
+		})
+	case "offer-bonjour":
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return offerBonjour(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy, *signalPeer)
 		})
 	case "offer-ssh":
 		runWithTimeout(*timeout, func(ctx context.Context) error {

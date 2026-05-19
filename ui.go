@@ -28,7 +28,7 @@ import (
 const (
 	linkHealthServiceType = "_awdl-webrtc._tcp"
 	linkHealthDomain      = "local."
-	linkHealthModes       = "discover,discover-wait,ui,udp,udp-perf,udp-latency,webrtc"
+	linkHealthModes       = "answer-bonjour,discover,discover-wait,offer-bonjour,ui,udp,udp-perf,udp-latency,webrtc"
 )
 
 var linkHealthProfileOrder = []string{"thunderbolt", "awdl", "lan"}
