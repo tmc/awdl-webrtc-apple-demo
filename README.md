@@ -401,7 +401,10 @@ AWDL_DEMO_NETWORK_TRACE=1 go run . -profile awdl -backend network -mode udp-perf
 The Network.framework backend proves Pion ICE gathering, raw UDP echo/perf, and
 remote WebRTC datachannel exchange over LAN, Thunderbolt, and AWDL. The
 `nwtransport` path demonstrates a Pion-native `transport.Net` backend for LAN,
-Thunderbolt, and AWDL WebRTC. AWDL still needs explicit signaling plus
-link-local candidate publication through `-candidate-policy auto` or `raw`;
-the mDNS-only AWDL `SetNet` path gathers candidates but does not open the
-remote datachannel here.
+Thunderbolt, and AWDL WebRTC. Its native branch intentionally owns only numeric
+UDP listeners, configured wildcard UDP listeners, and numeric UDP dials; named
+UDP endpoints, DNS, TCP, TURN/STUN helper traffic outside that selected UDP
+surface, and unsupported families stay on Pion's fallback network. AWDL still
+needs explicit signaling plus link-local candidate publication through
+`-candidate-policy auto` or `raw`; the mDNS-only AWDL `SetNet` path gathers
+candidates but does not open the remote datachannel here.
