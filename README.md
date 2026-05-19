@@ -12,7 +12,7 @@ The reusable Network.framework surfaces are:
 - `github.com/tmc/apple/x/network/nwpacket`: a Network.framework
   `net.PacketConn`, consumed from released `github.com/tmc/apple v0.6.7`.
 - `github.com/tmc/apple-pion/nwtransport`: a small Pion `transport.Net`
-  adapter, consumed from released `github.com/tmc/apple-pion v0.1.0`. It
+  adapter, consumed from released `github.com/tmc/apple-pion v0.1.1`. It
   routes concrete UDP listeners, configured wildcard UDP listeners, and UDP
   dials through Network.framework, while leaving DNS, TCP, unconstrained
   wildcard UDP, and TURN/STUN helper traffic outside that selected UDP surface
@@ -130,21 +130,24 @@ go run . -profile awdl -backend network -mdns disabled \
 
 go run . -profile lan -backend network -pion-net -mdns disabled \
   -mode offer-ssh -ssh tmc2@10.0.18.249 \
-  -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 35s
+  -remote-bin /Volumes/Shared/awdl-webrtc-apple-demo-bin -timeout 35s
 
 go run . -profile thunderbolt -backend network -pion-net -mdns disabled \
   -mode offer-ssh -ssh tmc2@10.0.18.249 \
-  -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 40s
+  -remote-bin /Volumes/Shared/awdl-webrtc-apple-demo-bin -timeout 40s
 
 go run . -profile awdl -backend network -pion-net -mdns disabled \
   -mode offer-ssh -ssh tmc2@10.0.18.249 \
-  -remote-bin /tmp/awdl-webrtc-apple-demo-bin -timeout 45s
+  -remote-bin /Volumes/Shared/awdl-webrtc-apple-demo-bin -timeout 45s
 ```
 
-To rerun the two-host productization matrix after the peer is reachable, use:
+To rerun the two-host productization matrix, use:
 
 ```sh
+CANDIDATE_POLICY=auto \
+REQUIRE_PATHS=1 \
 SSH_TARGET=tmc2@10.0.18.249 \
+  REMOTE_BIN=/Volumes/Shared/awdl-webrtc-apple-demo-bin \
   OUTPUT=/tmp/awdl-webrtc-matrix.txt \
   SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-summary.md \
   scripts/remote-matrix-bundle.sh
