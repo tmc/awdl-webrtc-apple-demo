@@ -2803,6 +2803,7 @@ func newWireSignal(desc webrtc.SessionDescription, policy icepolicy.Policy, loca
 }
 
 func setRemoteWireSignal(pc *webrtc.PeerConnection, signal wireSignal, label string) error {
+	traceWireSignal(label, signal)
 	if err := pc.SetRemoteDescription(signal.Description); err != nil {
 		return fmt.Errorf("set remote %s: %w", label, err)
 	}
@@ -2812,6 +2813,36 @@ func setRemoteWireSignal(pc *webrtc.PeerConnection, signal wireSignal, label str
 		}
 	}
 	return nil
+}
+
+func traceWireSignal(label string, signal wireSignal) {
+	if !traceWebRTC {
+		return
+	}
+	sdpCandidates, hasEnd := sdpCandidateLines(signal.Description.SDP)
+	fmt.Fprintf(os.Stderr, "webrtctrace: %s remote_signal type=%s sdp_candidates=%d explicit_candidates=%d end_of_candidates=%t\n",
+		label, signal.Description.Type, len(sdpCandidates), len(signal.Candidates), hasEnd)
+	for i, candidate := range sdpCandidates {
+		fmt.Fprintf(os.Stderr, "webrtctrace: %s remote_signal sdp_candidate[%d]=%s\n", label, i, candidate)
+	}
+	for i, candidate := range signal.Candidates {
+		fmt.Fprintf(os.Stderr, "webrtctrace: %s remote_signal explicit_candidate[%d]=%s\n", label, i, candidate.Candidate)
+	}
+}
+
+func sdpCandidateLines(sdp string) ([]string, bool) {
+	var candidates []string
+	var hasEnd bool
+	for _, line := range strings.Split(sdp, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "a=candidate:"):
+			candidates = append(candidates, strings.TrimPrefix(line, "a="))
+		case line == "a=end-of-candidates":
+			hasEnd = true
+		}
+	}
+	return candidates, hasEnd
 }
 
 func encodeWireSignal(signal wireSignal) (string, error) {

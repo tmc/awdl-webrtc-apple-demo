@@ -300,6 +300,29 @@ func TestDecodeWireSignalAcceptsLegacyDescription(t *testing.T) {
 	}
 }
 
+func TestSDPCandidateLines(t *testing.T) {
+	sdp := strings.Join([]string{
+		"v=0",
+		"a=mid:0",
+		"a=candidate:1 1 udp 2130706431 fd00::1 12345 typ host",
+		"a=candidate:2 1 udp 2130706431 fd00::2 23456 typ host",
+		"a=end-of-candidates",
+	}, "\n")
+	candidates, hasEnd := sdpCandidateLines(sdp)
+	if !hasEnd {
+		t.Fatal("end-of-candidates not detected")
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("candidates = %d, want 2", len(candidates))
+	}
+	if candidates[0] != "candidate:1 1 udp 2130706431 fd00::1 12345 typ host" {
+		t.Fatalf("candidate 0 = %q", candidates[0])
+	}
+	if candidates[1] != "candidate:2 1 udp 2130706431 fd00::2 23456 typ host" {
+		t.Fatalf("candidate 1 = %q", candidates[1])
+	}
+}
+
 func TestUDPCallbackWireRequest(t *testing.T) {
 	data, err := marshalUDPCallbackRequest("[fe80::1%awdl0]:12345", "ping")
 	if err != nil {
