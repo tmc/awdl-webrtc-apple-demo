@@ -266,7 +266,10 @@ step. Set `REMOTE_READY_TIMEOUT` to an integer number of seconds to retry SSH
 reachability before setup; `REMOTE_READY_INTERVAL` controls the retry sleep.
 Set `REMOTE_STEP_READY_TIMEOUT` to an integer number of seconds to retry SSH
 reachability before each remote sender or listener command when the peer is
-flaky after setup.
+flaky after setup. By default the matrix also kills stale local and remote demo
+processes whose command line starts with `LOCAL_BIN` or `REMOTE_BIN`, so an
+interrupted previous run cannot keep the temporary binary active while the next
+run replaces it. Set `CLEAN_STALE_PROCESSES=0` to disable that cleanup.
 `CANDIDATE_POLICY` defaults to `auto` for the `-pion-net -mdns disabled`
 WebRTC step. When `DURATION` is set, sender trials run for that duration
 instead of a fixed datagram count and listeners stop after

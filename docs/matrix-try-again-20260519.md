@@ -1,5 +1,10 @@
 # Matrix Retry, 2026-05-19
 
+This failed SSH-control-plane run is preserved for diagnostics. It was
+superseded by [matrix-20260519-success.md](matrix-20260519-success.md), which
+passed LAN, Thunderbolt, and AWDL after stale demo listener processes were
+cleaned up.
+
 Command:
 
 ```sh

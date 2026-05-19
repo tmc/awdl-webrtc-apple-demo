@@ -14,8 +14,8 @@ not released API.
 | Idea | Source pattern | Change for this demo |
 | --- | --- | --- |
 | Fail closed on the actual Network.framework path | Grove `cmd/grove-perftest/perftest.go` exposes `-nw-require-interface` and `-nw-forbid-loopback`; `transport/nw/path.go` reports `NWPath` status, interface names, types, and indexes. WeightShare `awdl_data_darwin.go` reports `AWDLPathInfo` and lets `awdl-speed -require-interface awdl0` fail if the transfer did not use AWDL. | `github.com/tmc/apple/x/network/nwpacket` now exposes `PathReporter`, and the demo has `-require-path-interface`, `-forbid-loopback-path`, and opt-in `REQUIRE_PATHS=1` remote-matrix enforcement. |
-| Add a Bonjour-discovered control path | Grove's Network.framework transport can advertise one service and dial a peer service by name; WeightShare uses `NWEndpointCreateBonjourService` for AWDL data transfers. | `answer-bonjour`/`offer-bonjour` now advertise and browse `_awdl-webrtc-signal._tcp` and carry the same WebRTC `OFFER`/`ANSWER` wire signal. The offer side uses `NSNetService` host/port resolution as a fallback when direct Bonjour endpoint dialing stalls. Local same-host `-signal-only` exchanges the signal lines and exits cleanly; two-host proof is still pending. |
-| Add callback-style reverse probes | WeightShare `MeasureAWDLSpeed` starts a temporary callback listener, sends the callback service name to the peer, and has the peer connect back to deliver data. | Use the added `udp-callback-listen` and `udp-callback-request` modes to make the peer send one datagram back to a temporary callback address. This should isolate listener/firewall/path issues behind the LAN/Thunderbolt/AWDL UDP asymmetry once the second Mac is reachable. |
+| Add a Bonjour-discovered control path | Grove's Network.framework transport can advertise one service and dial a peer service by name; WeightShare uses `NWEndpointCreateBonjourService` for AWDL data transfers. | `answer-bonjour`/`offer-bonjour` now advertise and browse `_awdl-webrtc-signal._tcp` and carry the same WebRTC `OFFER`/`ANSWER` wire signal. The offer side uses `NSNetService` host/port resolution as a fallback when direct Bonjour endpoint dialing stalls. Local same-host `-signal-only` exchanges the signal lines and exits cleanly; two-host Bonjour signaling is still pending. |
+| Add callback-style reverse probes | WeightShare `MeasureAWDLSpeed` starts a temporary callback listener, sends the callback service name to the peer, and has the peer connect back to deliver data. | The added `udp-callback-listen` and `udp-callback-request` modes now pass both directions on LAN, Thunderbolt, and AWDL in the current matrix, which makes listener/firewall/path asymmetry less likely than it was earlier. |
 | Broaden performance modes | Grove perftest has message size, warmup, iterations, duration mode, multi-stream/full-duplex mode, ping-pong latency, CPU/mem profiles, and JSON including path data. WeightShare transfers large chunks and prints path names with throughput. | Keep the current iperf-like UDP output, use the added `-duration`, `-streams`, `udp-latency`, and path JSON modes for longer samples. |
 | Handle transient Network.framework waiting states | Grove's `dialEndpoint` retries until a deadline and treats `NWConnectionStateWaiting` with a grace timer instead of immediately failing. | `tmc/apple v0.6.7` adds `nwpacket.Config.ConnectTimeout` and `ConnectRetries`; this demo uses a 2s readiness timeout with 2 outbound connection retries for both raw UDP and Pion `transport.Net` PacketConns, with `-nw-connect-timeout`, `-nw-connect-retries`, `NW_CONNECT_TIMEOUT`, and `NW_CONNECT_RETRIES` for remote sweeps. |
 | Capture the route state before perf | Grove and WeightShare debugging both depended on knowing the actual interface and route selected by macOS, not only the requested profile. | `scripts/remote-diagnostics.sh` captures local and remote `ifconfig`, IPv4/IPv6 route tables, route-to-peer output, `scutil --nwi`, hardware ports, and UDP sockets before rerunning the matrix. |
@@ -85,13 +85,11 @@ inconsistent with the requested profile.
 
 ## Suggested Order
 
-1. Run `scripts/remote-diagnostics.sh` once the second Mac is reachable.
-2. Run `REQUIRE_PATHS=1` remote matrix.
-3. Validate whether `tmc/apple v0.6.7` readiness retries clear the old reverse
-   AWDL/Thunderbolt timeout.
-4. Validate fixed-duration, multi-stream, and latency-only runs remotely.
-5. Validate callback-style reverse probes on the second Mac to isolate the
-   listener asymmetry.
-6. Run full Bonjour WebRTC on two Macs once the peer is reachable; the local
-   same-host `-signal-only` path exchanges signal lines, but full WebRTC still
-   times out in ICE checking.
+1. Run full Bonjour WebRTC on two Macs; the local same-host `-signal-only` path
+   exchanges signal lines, but the non-SSH two-host control plane still needs
+   proof.
+2. Validate the SwiftUI monitor on two live Macs while removing Thunderbolt to
+   observe fallback to AWDL.
+3. Run longer fixed-duration, multi-stream, and latency-only remote sweeps.
+4. Teach `remote-matrix.sh` to optionally use discovery output instead of hard-
+   coded addresses for AWDL and Thunderbolt.
