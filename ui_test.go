@@ -108,6 +108,45 @@ func TestLinkHealthDiscoveryRecordFromSnapshot(t *testing.T) {
 	}
 }
 
+func TestLinkHealthPeerMatches(t *testing.T) {
+	peer := linkHealthPeer{
+		ID:          "peer-id",
+		Name:        "peer-name",
+		ServiceName: "peer-service",
+	}
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"", true},
+		{" peer-id ", true},
+		{"peer-name", true},
+		{"peer-service", true},
+		{"missing", false},
+	}
+	for _, tt := range tests {
+		if got := linkHealthPeerMatches(peer, tt.name); got != tt.want {
+			t.Fatalf("linkHealthPeerMatches(%q) = %t, want %t", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestLinkHealthBrowserFirstMatchingPeer(t *testing.T) {
+	browser := newLinkHealthBrowser("self")
+	now := time.Now()
+	browser.peers["old"] = linkHealthPeer{ID: "old-id", Name: "old", ServiceName: "old-service", LastSeen: now.Add(-time.Minute)}
+	browser.peers["new"] = linkHealthPeer{ID: "new-id", Name: "new", ServiceName: "new-service", LastSeen: now}
+	if got := browser.FirstMatchingPeer(""); got.ID != "new-id" {
+		t.Fatalf("FirstMatchingPeer(empty) = %#v, want new-id", got)
+	}
+	if got := browser.FirstMatchingPeer("old-service"); got.ID != "old-id" {
+		t.Fatalf("FirstMatchingPeer(old-service) = %#v, want old-id", got)
+	}
+	if got := browser.FirstMatchingPeer("missing"); got.ID != "" {
+		t.Fatalf("FirstMatchingPeer(missing) = %#v, want empty", got)
+	}
+}
+
 func TestLinkHealthPerfError(t *testing.T) {
 	if got := linkHealthPerfError(udpPerfRecord{Count: 20, Datagrams: 0}); got != "no replies" {
 		t.Fatalf("linkHealthPerfError(all lost) = %q, want no replies", got)

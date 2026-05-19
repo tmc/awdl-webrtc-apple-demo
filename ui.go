@@ -195,17 +195,14 @@ type linkHealthDiscoveryLink struct {
 }
 
 func runLinkDiscovery(ctx context.Context, cfg linkHealthConfig) error {
-	cfg = normalizeLinkHealthConfig(cfg)
-	agent := newLinkHealthAgent(cfg)
-	agent.browser = newLinkHealthBrowser(agent.serviceName)
-	if err := agent.browser.Start(); err != nil {
+	agent, cleanup, err := startLinkHealthAgent(cfg)
+	if err != nil {
 		return err
 	}
-	defer agent.browser.Stop()
-	defer agent.Close()
+	defer cleanup()
 
 	enc := json.NewEncoder(os.Stdout)
-	tick := time.NewTicker(cfg.Interval)
+	tick := time.NewTicker(agent.cfg.Interval)
 	defer tick.Stop()
 	for {
 		agent.refresh(ctx)
@@ -224,6 +221,45 @@ func runLinkDiscovery(ctx context.Context, cfg linkHealthConfig) error {
 		case <-tick.C:
 		}
 	}
+}
+
+func runLinkDiscoverWait(ctx context.Context, cfg linkHealthConfig, peerName string) error {
+	agent, cleanup, err := startLinkHealthAgent(cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	enc := json.NewEncoder(os.Stdout)
+	tick := time.NewTicker(agent.cfg.Interval)
+	defer tick.Stop()
+	for {
+		agent.refresh(ctx)
+		agent.publish()
+		peer := agent.browser.FirstMatchingPeer(peerName)
+		if peer.ID != "" {
+			return enc.Encode(linkHealthDiscoveryRecordFromSnapshot(agent.snapshot("peer found", peer)))
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("discover wait for %s: %w", linkHealthPeerMatchLabel(peerName), ctx.Err())
+		case <-tick.C:
+		}
+	}
+}
+
+func startLinkHealthAgent(cfg linkHealthConfig) (*linkHealthAgent, func(), error) {
+	cfg = normalizeLinkHealthConfig(cfg)
+	agent := newLinkHealthAgent(cfg)
+	agent.browser = newLinkHealthBrowser(agent.serviceName)
+	if err := agent.browser.Start(); err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		agent.browser.Stop()
+		agent.Close()
+	}
+	return agent, cleanup, nil
 }
 
 func linkHealthDiscoveryRecordFromSnapshot(snapshot linkHealthSnapshot) linkHealthDiscoveryRecord {
@@ -253,6 +289,21 @@ func linkHealthDiscoveryRecordFromSnapshot(snapshot linkHealthSnapshot) linkHeal
 		})
 	}
 	return record
+}
+
+func linkHealthPeerMatchLabel(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return "any peer"
+	}
+	return name
+}
+
+func linkHealthPeerMatches(peer linkHealthPeer, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return true
+	}
+	return peer.ID == name || peer.Name == name || peer.ServiceName == name
 }
 
 func (a *linkHealthApp) apply(snapshot linkHealthSnapshot) {
@@ -800,6 +851,10 @@ func (b *linkHealthBrowser) Stop() {
 }
 
 func (b *linkHealthBrowser) FirstPeer() linkHealthPeer {
+	return b.FirstMatchingPeer("")
+}
+
+func (b *linkHealthBrowser) FirstMatchingPeer(name string) linkHealthPeer {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	peers := make([]linkHealthPeer, 0, len(b.peers))
@@ -812,7 +867,12 @@ func (b *linkHealthBrowser) FirstPeer() linkHealthPeer {
 	if len(peers) == 0 {
 		return linkHealthPeer{}
 	}
-	return peers[0]
+	for _, peer := range peers {
+		if linkHealthPeerMatches(peer, name) {
+			return peer
+		}
+	}
+	return linkHealthPeer{}
 }
 
 func (b *linkHealthBrowser) handleResults(oldResult, newResult objectivec.Object, _ bool) {

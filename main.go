@@ -134,7 +134,7 @@ func main() {
 	backendName := flag.String("backend", string(udpBackendGo), "UDP backend: go or network")
 	pionNet := flag.Bool("pion-net", false, "use Network.framework as Pion transport.Net instead of ICE UDP mux")
 	mdnsName := flag.String("mdns", "query-and-gather", "ICE mDNS mode: query-and-gather, query-only, or disabled")
-	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-stdio, offer-ssh, discover, udp, udp-listen, udp-send, udp-callback-listen, udp-callback-request, udp-perf, udp-perf-listen, udp-perf-send, udp-latency, udp-latency-send, or ui")
+	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-stdio, offer-ssh, discover, discover-wait, udp, udp-listen, udp-send, udp-callback-listen, udp-callback-request, udp-perf, udp-perf-listen, udp-perf-send, udp-latency, udp-latency-send, or ui")
 	timeout := flag.Duration("timeout", 8*time.Second, "timeout for WebRTC and UDP modes")
 	peerAddr := flag.String("peer", "", "remote UDP address for udp-send, such as [fe80::1%awdl0]:12345")
 	sshTarget := flag.String("ssh", "", "ssh target for offer-ssh, such as tmc2@10.0.18.249")
@@ -160,6 +160,7 @@ func main() {
 	uiInterval := flag.Duration("ui-interval", 3*time.Second, "SwiftUI link monitor sample interval")
 	uiCount := flag.Int("ui-count", 20, "SwiftUI link monitor datagrams per sample")
 	uiWindow := flag.Int("ui-window", 4, "SwiftUI link monitor maximum in-flight datagrams per sample")
+	discoverPeer := flag.String("discover-peer", "", "peer id, name, or service name for discover-wait; empty accepts the newest peer")
 	flag.Parse()
 	pathPolicy := udpPathPolicy{
 		RequireInterface: strings.TrimSpace(*requirePathInterface),
@@ -172,6 +173,15 @@ func main() {
 	traceWebRTC = *webrtcTrace
 	if err := validateNetworkConnectPolicy(networkConnect); err != nil {
 		fail(err)
+	}
+	setupf := func(format string, args ...any) {
+		fmt.Printf(format, args...)
+	}
+	switch *mode {
+	case "discover", "discover-wait":
+		setupf = func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format, args...)
+		}
 	}
 
 	profile, err := profileByName(*profileName)
@@ -203,7 +213,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	fmt.Printf("profile=%s interface=%s index=%d flags=%s ips=%s\n",
+	setupf("profile=%s interface=%s index=%d flags=%s ips=%s\n",
 		profile.Name,
 		iface.Name,
 		iface.Index,
@@ -211,7 +221,7 @@ func main() {
 		ipList(iface.IPs),
 	)
 	if len(iface.IPs) == 0 {
-		fmt.Printf("warning: %s has no usable IP addresses; WebRTC ICE gathering cannot produce host candidates\n", iface.Name)
+		setupf("warning: %s has no usable IP addresses; WebRTC ICE gathering cannot produce host candidates\n", iface.Name)
 	}
 	candidatePolicy, err := newCandidatePolicyConfig(profile, iface, mdnsMode, *candidatePolicyName, *rawCandidates)
 	if err != nil {
@@ -222,7 +232,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	fmt.Printf("apple.network include_peer_to_peer=%t required_interface_type=%s\n",
+	setupf("apple.network include_peer_to_peer=%t required_interface_type=%s\n",
 		publicPolicy.IncludePeerToPeer,
 		publicPolicy.RequiredInterfaceType,
 	)
@@ -231,7 +241,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	fmt.Printf("apple.private.network required_interface=%s required_interface_type=%d use_awdl=%t use_p2p=%t allow_socket_access=%t reuse_local_address=%t prohibit_fallback=%t valid=%t\n",
+	setupf("apple.private.network required_interface=%s required_interface_type=%d use_awdl=%t use_p2p=%t allow_socket_access=%t reuse_local_address=%t prohibit_fallback=%t valid=%t\n",
 		privatePolicy.RequiredInterfaceName,
 		privatePolicy.RequiredInterfaceType,
 		privatePolicy.UseAWDL,
@@ -241,14 +251,14 @@ func main() {
 		privatePolicy.ProhibitFallback,
 		privatePolicy.Valid,
 	)
-	fmt.Printf("apple.private.network interface type=%d type_string=%q mtu=%d supports_multicast=%t\n",
+	setupf("apple.private.network interface type=%d type_string=%q mtu=%d supports_multicast=%t\n",
 		privatePolicy.InterfaceType,
 		privatePolicy.InterfaceTypeString,
 		privatePolicy.InterfaceMTU,
 		privatePolicy.InterfaceMulticast,
 	)
 	if backend == udpBackendNetwork {
-		fmt.Printf("apple.network packet_connect_timeout=%s packet_connect_retries=%d\n", networkConnect.Timeout, networkConnect.Retries)
+		setupf("apple.network packet_connect_timeout=%s packet_connect_retries=%d\n", networkConnect.Timeout, networkConnect.Retries)
 	}
 
 	switch *mode {
@@ -284,6 +294,17 @@ func main() {
 				Window:        *uiWindow,
 				PacketTimeout: *packetTimeout,
 			})
+		})
+	case "discover-wait":
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return runLinkDiscoverWait(ctx, linkHealthConfig{
+				Backend:       backend,
+				Interval:      *uiInterval,
+				Count:         *uiCount,
+				Size:          *size,
+				Window:        *uiWindow,
+				PacketTimeout: *packetTimeout,
+			}, *discoverPeer)
 		})
 	case "udp":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
