@@ -112,5 +112,5 @@ diagnose_body local "$interfaces" "$routes"
 
 if [[ $run_remote == 1 ]]; then
 	remote_script="$(declare -f run_cmd diagnose_body); diagnose_body remote $(sq "$interfaces") $(sq "$routes")"
-	run_cmd ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$remote_script"
+	run_cmd ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "bash -lc $(sq "$remote_script")"
 fi
