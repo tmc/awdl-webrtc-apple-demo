@@ -18,6 +18,8 @@ streams=${STREAMS:-1}
 timeout=${TIMEOUT:-45s}
 message=${MESSAGE:-callback}
 connect_timeout=${CONNECT_TIMEOUT:-5}
+remote_ready_timeout=${REMOTE_READY_TIMEOUT:-0}
+remote_ready_interval=${REMOTE_READY_INTERVAL:-5}
 nw_connect_timeout=${NW_CONNECT_TIMEOUT:-2s}
 nw_connect_retries=${NW_CONNECT_RETRIES:-2}
 candidate_policy=${CANDIDATE_POLICY:-auto}
@@ -38,6 +40,18 @@ webrtc_trace_args=()
 case "$webrtc_trace" in
 1 | true | TRUE | yes | YES | on | ON)
 	webrtc_trace_args=(-webrtc-trace)
+	;;
+esac
+case "$remote_ready_timeout" in
+'' | *[!0-9]*)
+	printf 'REMOTE_READY_TIMEOUT must be an integer number of seconds, got %q\n' "$remote_ready_timeout" >&2
+	exit 2
+	;;
+esac
+case "$remote_ready_interval" in
+'' | *[!0-9]*)
+	printf 'REMOTE_READY_INTERVAL must be an integer number of seconds, got %q\n' "$remote_ready_interval" >&2
+	exit 2
 	;;
 esac
 
@@ -202,6 +216,37 @@ wait_for_callback_peer() {
 remote() {
 	local cmd=$1
 	run ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$cmd"
+}
+
+wait_for_remote_ready() {
+	if ((remote_ready_timeout == 0)); then
+		remote "true"
+		return
+	fi
+	local deadline=$((SECONDS + remote_ready_timeout))
+	local attempt=0
+	local rc=1
+	while :; do
+		attempt=$((attempt + 1))
+		printf 'remote readiness attempt=%d remaining=%ds\n' "$attempt" "$((deadline - SECONDS))"
+		if remote "true"; then
+			return 0
+		else
+			rc=$?
+		fi
+		if ((SECONDS >= deadline)); then
+			return "$rc"
+		fi
+		local sleep_for=$remote_ready_interval
+		local remaining=$((deadline - SECONDS))
+		if ((sleep_for > remaining)); then
+			sleep_for=$remaining
+		fi
+		if ((sleep_for <= 0)); then
+			return "$rc"
+		fi
+		sleep "$sleep_for"
+	done
 }
 
 remote_network_args() {
@@ -544,6 +589,8 @@ printf 'window=%s\n' "$window"
 printf 'streams=%s\n' "$streams"
 printf 'timeout=%s\n' "$timeout"
 printf 'connect_timeout=%s\n' "$connect_timeout"
+printf 'remote_ready_timeout=%s\n' "$remote_ready_timeout"
+printf 'remote_ready_interval=%s\n' "$remote_ready_interval"
 printf 'nw_connect_timeout=%s\n' "$nw_connect_timeout"
 printf 'nw_connect_retries=%s\n' "$nw_connect_retries"
 printf 'candidate_policy=%s\n' "$candidate_policy"
@@ -560,7 +607,7 @@ printf 'output=%s\n' "$output"
 diagnose_local_reachability
 
 printf '## remote reachability\n'
-if remote "true"; then
+if wait_for_remote_ready; then
 	:
 else
 	rc=$?

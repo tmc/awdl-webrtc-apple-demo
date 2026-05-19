@@ -191,7 +191,8 @@ Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `NW_CONNECT_TIMEOUT`, `NW_CONNECT_RETRIES`, `CANDIDATE_POLICY`, or
 `LISTEN_IDLE_TIMEOUT` to narrow, lengthen, save, or tune a run. Set
 `WEBRTC_TRACE=1` to add `-webrtc-trace` to each Pion `transport.Net` WebRTC
-step.
+step. Set `REMOTE_READY_TIMEOUT` to an integer number of seconds to retry SSH
+reachability before setup; `REMOTE_READY_INTERVAL` controls the retry sleep.
 `CANDIDATE_POLICY` defaults to `auto` for the `-pion-net -mdns disabled`
 WebRTC step. When `DURATION` is set, sender trials run for that duration
 instead of a fixed datagram count and listeners stop after
