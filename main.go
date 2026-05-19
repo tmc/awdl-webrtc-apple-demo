@@ -134,7 +134,7 @@ func main() {
 	backendName := flag.String("backend", string(udpBackendGo), "UDP backend: go or network")
 	pionNet := flag.Bool("pion-net", false, "use Network.framework as Pion transport.Net instead of ICE UDP mux")
 	mdnsName := flag.String("mdns", "query-and-gather", "ICE mDNS mode: query-and-gather, query-only, or disabled")
-	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-ssh, udp, udp-listen, udp-send, udp-callback-listen, udp-callback-request, udp-perf, udp-perf-listen, udp-perf-send, udp-latency, udp-latency-send, or ui")
+	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-stdio, offer-ssh, udp, udp-listen, udp-send, udp-callback-listen, udp-callback-request, udp-perf, udp-perf-listen, udp-perf-send, udp-latency, udp-latency-send, or ui")
 	timeout := flag.Duration("timeout", 8*time.Second, "timeout for WebRTC and UDP modes")
 	peerAddr := flag.String("peer", "", "remote UDP address for udp-send, such as [fe80::1%awdl0]:12345")
 	sshTarget := flag.String("ssh", "", "ssh target for offer-ssh, such as tmc2@10.0.18.249")
@@ -265,6 +265,10 @@ func main() {
 	case "answer-stdio":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
 			return answerStdio(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy)
+		})
+	case "offer-stdio":
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return offerStdio(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy)
 		})
 	case "offer-ssh":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
@@ -820,6 +824,85 @@ func answerStdio(ctx context.Context, profile linkProfile, iface linkInterface, 
 	case <-ctx.Done():
 		return fmt.Errorf("wait for answer datachannel message over %s: %w; %s", iface.Name, ctx.Err(), diag.snapshot())
 	}
+}
+
+func offerStdio(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, usePionNet bool, mdnsMode ice.MulticastDNSMode, candidatePolicy candidatePolicyConfig) error {
+	link, err := newLinkWebRTCNet(profile, iface, backend, usePionNet)
+	if err != nil {
+		return err
+	}
+	defer link.Close()
+	link.print("offer", iface, mdnsMode, candidatePolicy)
+
+	pc, err := newPeer(iface, link, mdnsMode, candidatePolicy.Policy)
+	if err != nil {
+		return err
+	}
+	defer pc.Close()
+	diag := newWebRTCDiagnostics("offer", pc)
+
+	opened := make(chan struct{})
+	received := make(chan string, 1)
+	dc, err := pc.CreateDataChannel("link-stdio", nil)
+	if err != nil {
+		return fmt.Errorf("create data channel: %w", err)
+	}
+	diag.setDataChannel("local:link-stdio", dc)
+	dc.OnOpen(func() {
+		diag.dataChannelState("local:link-stdio", "open")
+		close(opened)
+		_ = dc.SendText("ping")
+	})
+	dc.OnClose(func() {
+		diag.dataChannelState("local:link-stdio", "closed")
+	})
+	dc.OnError(func(err error) {
+		diag.dataChannelError("local:link-stdio", err)
+	})
+	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+		received <- string(msg.Data)
+	})
+
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		return fmt.Errorf("create offer: %w", err)
+	}
+	gathered := webrtc.GatheringCompletePromise(pc)
+	if err := pc.SetLocalDescription(offer); err != nil {
+		return fmt.Errorf("set local offer: %w", err)
+	}
+	if err := wait(ctx, gathered, "offer gather"); err != nil {
+		return err
+	}
+	wireOffer, err := encodeWireSignal(newWireSignal(*pc.LocalDescription(), candidatePolicy.Policy, link.ip))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("OFFER %s\n", wireOffer)
+	fmt.Fprintln(os.Stderr, "paste an ANSWER line from the answer-stdio peer, then press return")
+
+	answer, err := readWireSignal(bufio.NewScanner(os.Stdin), "ANSWER")
+	if err != nil {
+		return err
+	}
+	if err := setRemoteWireSignal(pc, answer, "answer"); err != nil {
+		return err
+	}
+	select {
+	case <-opened:
+	case <-ctx.Done():
+		return fmt.Errorf("wait for data channel open over %s: %w; %s", iface.Name, ctx.Err(), diag.snapshot())
+	}
+	select {
+	case got := <-received:
+		if got != "pong" {
+			return fmt.Errorf("received %q, want pong", got)
+		}
+		fmt.Printf("webrtc datachannel opened and exchanged payload over %s-constrained ICE\n", iface.Name)
+	case <-ctx.Done():
+		return fmt.Errorf("wait for datachannel pong over %s: %w; %s", iface.Name, ctx.Err(), diag.snapshot())
+	}
+	return nil
 }
 
 func offerSSH(ctx context.Context, profile linkProfile, iface linkInterface, backend udpBackend, usePionNet bool, mdnsMode ice.MulticastDNSMode, candidatePolicy candidatePolicyConfig, timeout time.Duration, sshTarget, remoteBin string) error {

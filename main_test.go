@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -297,6 +298,27 @@ func TestDecodeWireSignalAcceptsLegacyDescription(t *testing.T) {
 	}
 	if signal.Description.SDP != desc.SDP || signal.Description.Type != desc.Type {
 		t.Fatalf("legacy signal = %#v, want %#v", signal.Description, desc)
+	}
+}
+
+func TestReadWireSignalIgnoresNonSignalLines(t *testing.T) {
+	desc := webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: "v=0"}
+	value, err := encodeWireSignal(wireSignal{Description: desc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := strings.Join([]string{
+		"profile=awdl interface=awdl0",
+		"paste an ANSWER line from the answer-stdio peer",
+		"ANSWER " + value,
+		"",
+	}, "\n")
+	signal, err := readWireSignal(bufio.NewScanner(strings.NewReader(input)), "ANSWER")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signal.Description.Type != desc.Type || signal.Description.SDP != desc.SDP {
+		t.Fatalf("signal = %#v, want %#v", signal.Description, desc)
 	}
 }
 
