@@ -38,6 +38,25 @@ with 321.947 ms latency, then timed out on TCP/22 for `nc` and four SSH
 readiness attempts. It did not reach binary upload or LAN/Thunderbolt/AWDL
 test execution.
 
+## Prompt-to-Artifact Checklist
+
+This checklist maps the original requests to concrete files, commands, and
+current evidence. A passing local gate is not counted as proof for requirements
+that need two Macs.
+
+| Request | Artifact / command | Current evidence | Gap |
+| --- | --- | --- | --- |
+| Demonstrate WebRTC support over Apple links | `main.go` modes `gather`, `pair`, `answer-stdio`, `offer-stdio`, and `offer-ssh`; Pion WebRTC in `newPeer`; [RESULTS.md](../RESULTS.md). | LAN and Thunderbolt Pion-native WebRTC passed in the recorded two-host matrix; UDP-mux AWDL WebRTC passed historically. | Fresh AWDL Pion-native WebRTC still fails or is blocked by peer reachability. |
+| Keep backends pluggable | `-backend go\|network`; `-pion-net` switch from `SetICEUDPMux` to `SettingEngine.SetNet`; `github.com/tmc/apple-pion/nwtransport`. | `GOWORK=off go test ./...` and release preflight pass; `apple-pion v0.1.3` is imported without a local replace. | Broader all-Network.framework TCP/TURN/STUN ownership remains outside this demo. |
+| Use published `tmc/apple` bindings | `go.mod`; `scripts/release-preflight.sh`; module cache resolution. | Release preflight reports `github.com/tmc/apple v0.6.7` and `github.com/tmc/apple-pion v0.1.3` from the module cache. | None for the published module pins. |
+| Prove UDP over AWDL | `udp`, `udp-perf`, `udp-latency`, `udp-callback-*`; [matrix-v0.1.1.md](matrix-v0.1.1.md). | Recorded matrix shows AWDL raw Network.framework UDP perf, latency, and callback probes pass both directions over `awdl0`. | Longer duration and multi-stream sweeps still need a reachable peer. |
+| Cover Thunderbolt, AWDL, and LAN tests | `scripts/remote-matrix.sh`; `scripts/remote-matrix-bundle.sh`; path requirements. | Recorded matrix covers all three profiles; latest retry writes a failure summary when SSH setup is blocked. | Fresh matrix cannot run while TCP/22 to `tmc2@10.0.18.249` times out. |
+| Add iperf-like output and result tables | UDP summary printers in `main.go`; `cmd/matrix-summary`; [RESULTS.md](../RESULTS.md). | Output includes transfer, bitrate, datagrams, loss, RTT, JSON, path records, summaries, and Markdown tables. | Longer comparative runs still need live peer access. |
+| Package reusable pieces out of the temporary demo | `github.com/tmc/apple/x/network/nwpacket`; `github.com/tmc/apple-pion/nwtransport`; `github.com/tmc/apple-pion/icepolicy`. | Published packages have tests/examples and are consumed by the demo as releases. | None for the package split. |
+| Add SwiftUI link-health view with fallback | `ui.go`; `ui_test.go`; `-mode ui`; README UI command. | UI advertises Bonjour TXT metadata, samples Thunderbolt, AWDL, then LAN, and falls back when a higher-priority path returns no replies. | It measures UDP link health, not WebRTC datachannel health, and has not been verified on two live Macs in this retry. |
+| Avoid SSH as the only control plane | `offer-stdio` and `answer-stdio`; README manual signaling workflow. | Parser tests pass; local two-process smoke exchanged `OFFER` and `ANSWER` lines. | Same-host datachannel did not open; two-host manual signaling still needs a peer or another transport for the two signal lines. |
+| Keep repo hygiene and atomic history | Git commits and notes; `git status`; release preflight. | Demo and `apple-pion` worktrees are clean and pushed; notes are pushed; `tmc/apple` unrelated untracked files are preserved. | None for owned files; continue ignoring unrelated `tmc/apple` worktree state. |
+
 ## Requirement Checklist
 
 | Requirement | Artifact / evidence | Status | Remaining proof |
