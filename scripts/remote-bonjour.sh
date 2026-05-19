@@ -186,21 +186,11 @@ wait_for_service() {
 	done
 }
 
-append_trace_args() {
-	if webrtc_trace_enabled; then
-		out_args+=(-webrtc-trace)
-	fi
-}
-
 run_bonjour_pair() {
 	local profile=$1
 	local phase=$2
 	local name="${signal_prefix}-${profile}-${phase}-$$"
-	local signal_only=()
 	local label="$profile bonjour $phase"
-	if [[ $phase == signal ]]; then
-		signal_only=(-signal-only)
-	fi
 
 	local remote_log
 	remote_log=$(mktemp)
@@ -233,9 +223,12 @@ run_bonjour_pair() {
 			-signal-peer "$name"
 			-timeout "$timeout"
 		)
-		out_args=()
-		append_trace_args
-		local_args+=("${out_args[@]}" "${signal_only[@]}")
+		if webrtc_trace_enabled; then
+			local_args+=(-webrtc-trace)
+		fi
+		if [[ $phase == signal ]]; then
+			local_args+=(-signal-only)
+		fi
 		run "${local_args[@]}" || rc=$?
 	else
 		rc=1
