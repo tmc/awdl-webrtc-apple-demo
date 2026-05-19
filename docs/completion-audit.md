@@ -14,6 +14,30 @@ do not complete requirements that need a fresh two-host run.
 | Remote reachability | BLOCKED: the 2026-05-19 retry reached the host only intermittently by ICMP, while `ssh -o BatchMode=yes -o ConnectTimeout=20 ... tmc2@10.0.18.249` and `nc -vz -G 5 10.0.18.249 22` both timed out on TCP/22. `REMOTE_READY_TIMEOUT` can now wait for SSH before matrix setup, but the two-host trace run still needs the peer reachable. |
 | Remote matrix | PARTIAL: `CANDIDATE_POLICY=auto REQUIRE_PATHS=1 SSH_TARGET=tmc2@10.0.18.249 REMOTE_BIN=/Volumes/Shared/awdl-webrtc-apple-demo-bin OUTPUT=/tmp/awdl-webrtc-matrix-v011.txt SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-v011.md scripts/remote-matrix-bundle.sh` completed all probes and failed only `awdl Pion transport.Net WebRTC`. LAN and Thunderbolt Pion-native WebRTC passed; LAN/Thunderbolt/AWDL raw Network.framework UDP perf, latency, and callback probes passed with path evidence. |
 
+## Latest Retry Evidence
+
+Command:
+
+```sh
+WEBRTC_TRACE=1 REMOTE_READY_TIMEOUT=30 CANDIDATE_POLICY=auto REQUIRE_PATHS=1 \
+  SSH_TARGET=tmc2@10.0.18.249 \
+  REMOTE_BIN=/Volumes/Shared/awdl-webrtc-apple-demo-bin \
+  OUTPUT=/tmp/awdl-webrtc-matrix-trace-retry.txt \
+  SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-trace-retry.md \
+  scripts/remote-matrix-bundle.sh
+```
+
+Result:
+
+| Section | Kind | Trial | Datagrams | Lost | Loss | Transfer | Bitrate | Elapsed | RTT avg | RTT p95 | Path |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| remote reachability | failure | - | - | - | - | - | - | - | - | - | remote reachability exit=255 |
+
+The bundle ran local diagnostics, reached `10.0.18.249` once by ICMP over `en0`
+with 321.947 ms latency, then timed out on TCP/22 for `nc` and four SSH
+readiness attempts. It did not reach binary upload or LAN/Thunderbolt/AWDL
+test execution.
+
 ## Requirement Checklist
 
 | Requirement | Artifact / evidence | Status | Remaining proof |
