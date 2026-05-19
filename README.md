@@ -186,7 +186,9 @@ written in one run; it preserves the matrix exit code after writing the summary.
 Override `PROFILES`, `COUNT`, `DURATION`, `WARMUP`, `TRIALS`, `WINDOW`,
 `STREAMS`, `TIMEOUT`, `LOCAL_BIN`, `REMOTE_BIN`, `OUTPUT`,
 `NW_CONNECT_TIMEOUT`, `NW_CONNECT_RETRIES`, `CANDIDATE_POLICY`, or
-`LISTEN_IDLE_TIMEOUT` to narrow, lengthen, save, or tune a run.
+`LISTEN_IDLE_TIMEOUT` to narrow, lengthen, save, or tune a run. Set
+`WEBRTC_TRACE=1` to add `-webrtc-trace` to each Pion `transport.Net` WebRTC
+step.
 `CANDIDATE_POLICY` defaults to `auto` for the `-pion-net -mdns disabled`
 WebRTC step. When `DURATION` is set, sender trials run for that duration
 instead of a fixed datagram count and listeners stop after
