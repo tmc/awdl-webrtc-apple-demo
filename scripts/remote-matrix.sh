@@ -25,6 +25,8 @@ nw_connect_timeout=${NW_CONNECT_TIMEOUT:-2s}
 nw_connect_retries=${NW_CONNECT_RETRIES:-2}
 candidate_policy=${CANDIDATE_POLICY:-auto}
 webrtc_trace=${WEBRTC_TRACE:-0}
+webrtc_attempts=${WEBRTC_ATTEMPTS:-1}
+webrtc_retry_delay=${WEBRTC_RETRY_DELAY:-2}
 listen_idle_timeout=${LISTEN_IDLE_TIMEOUT:-2s}
 require_paths=${REQUIRE_PATHS:-0}
 cleanup_stale_processes=${CLEAN_STALE_PROCESSES:-1}
@@ -38,12 +40,14 @@ if [[ -n $output ]]; then
 	exec > >(tee "$output") 2>&1
 fi
 
-webrtc_trace_args=()
-case "$webrtc_trace" in
-1 | true | TRUE | yes | YES | on | ON)
-	webrtc_trace_args=(-webrtc-trace)
-	;;
-esac
+webrtc_trace_enabled() {
+	case "$webrtc_trace" in
+	1 | true | TRUE | yes | YES | on | ON)
+		return 0
+		;;
+	esac
+	return 1
+}
 case "$remote_ready_timeout" in
 '' | *[!0-9]*)
 	printf 'REMOTE_READY_TIMEOUT must be an integer number of seconds, got %q\n' "$remote_ready_timeout" >&2
@@ -59,6 +63,18 @@ esac
 case "$remote_step_ready_timeout" in
 '' | *[!0-9]*)
 	printf 'REMOTE_STEP_READY_TIMEOUT must be an integer number of seconds, got %q\n' "$remote_step_ready_timeout" >&2
+	exit 2
+	;;
+esac
+case "$webrtc_attempts" in
+'' | *[!0-9]*)
+	printf 'WEBRTC_ATTEMPTS must be an integer, got %q\n' "$webrtc_attempts" >&2
+	exit 2
+	;;
+esac
+case "$webrtc_retry_delay" in
+'' | *[!0-9]*)
+	printf 'WEBRTC_RETRY_DELAY must be an integer number of seconds, got %q\n' "$webrtc_retry_delay" >&2
 	exit 2
 	;;
 esac
@@ -111,6 +127,12 @@ cleanup_remote_bin_processes() {
 cleanup_matrix_processes() {
 	cleanup_local_bin_processes
 	cleanup_remote_bin_processes
+}
+
+cleanup_on_exit() {
+	local rc=$?
+	cleanup_matrix_processes
+	exit "$rc"
 }
 
 addr_host() {
@@ -578,6 +600,43 @@ run_bidirectional_perf() {
 	return "$rc"
 }
 
+run_webrtc_offer_ssh() {
+	local profile=$1
+	local attempt rc
+	local args=(
+		"$local_bin"
+		-profile "$profile"
+		-backend network
+		-nw-connect-timeout "$nw_connect_timeout"
+		-nw-connect-retries "$nw_connect_retries"
+		-pion-net
+		-mdns disabled
+		-candidate-policy "$candidate_policy"
+		-mode offer-ssh
+		-ssh "$ssh_target"
+		-remote-bin "$remote_bin"
+		-timeout "$timeout"
+	)
+	if webrtc_trace_enabled; then
+		args+=(-webrtc-trace)
+	fi
+	for ((attempt = 1; attempt <= webrtc_attempts; attempt++)); do
+		if ((webrtc_attempts > 1)); then
+			printf 'webrtc attempt=%d/%d\n' "$attempt" "$webrtc_attempts"
+		fi
+		if run "${args[@]}"; then
+			return 0
+		else
+			rc=$?
+		fi
+		cleanup_matrix_processes
+		if ((attempt < webrtc_attempts)); then
+			sleep "$webrtc_retry_delay"
+		fi
+	done
+	return "$rc"
+}
+
 run_local_callback_then_remote_request() {
 	local profile=$1
 	local log
@@ -666,6 +725,8 @@ printf 'nw_connect_timeout=%s\n' "$nw_connect_timeout"
 printf 'nw_connect_retries=%s\n' "$nw_connect_retries"
 printf 'candidate_policy=%s\n' "$candidate_policy"
 printf 'webrtc_trace=%s\n' "$webrtc_trace"
+printf 'webrtc_attempts=%s\n' "$webrtc_attempts"
+printf 'webrtc_retry_delay=%s\n' "$webrtc_retry_delay"
 printf 'listen_idle_timeout=%s\n' "$listen_idle_timeout"
 printf 'require_paths=%s\n' "$require_paths"
 printf 'cleanup_stale_processes=%s\n' "$cleanup_stale_processes"
@@ -687,7 +748,7 @@ else
 	exit "$rc"
 fi
 
-trap cleanup_matrix_processes EXIT
+trap cleanup_on_exit EXIT
 cleanup_matrix_processes
 
 printf '## build local binary\n'
@@ -699,7 +760,7 @@ remote "chmod +x $(sq "$remote_bin") && $(sq "$remote_bin") -mode check -profile
 
 for profile in $profiles; do
 	printf '## %s Pion transport.Net WebRTC\n' "$profile"
-	record_matrix_step "$profile Pion transport.Net WebRTC" run "$local_bin" -profile "$profile" -backend network -nw-connect-timeout "$nw_connect_timeout" -nw-connect-retries "$nw_connect_retries" -pion-net -mdns disabled -candidate-policy "$candidate_policy" -mode offer-ssh -ssh "$ssh_target" -remote-bin "$remote_bin" -timeout "$timeout" "${webrtc_trace_args[@]}"
+	record_matrix_step "$profile Pion transport.Net WebRTC" run_webrtc_offer_ssh "$profile"
 
 	record_matrix_step "$profile remote-to-local UDP perf" run_local_listener_then_remote_sender "$profile"
 	record_matrix_step "$profile local-to-remote UDP perf" run_remote_listener_then_local_sender "$profile"
