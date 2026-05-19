@@ -185,9 +185,10 @@ GOWORK=off go run . -profile awdl -backend network -pion-net -mdns disabled \
 
 The answer side advertises `_awdl-webrtc-signal._tcp` with the same version,
 commit, and supported-mode TXT metadata used by the link monitor. The current
-local same-host smoke confirms Bonjour browse/resolve and external TCP
-reachability, but `NWConnection` self-dialing that Bonjour endpoint stays in
-`NWConnectionStatePreparing`; use two Macs for the real proof.
+local same-host smoke confirms Bonjour browse/resolve and exchanges the signal
+lines by falling back from the Bonjour endpoint to `NSNetService` host/port
+resolution plus Network.framework TCP. Same-host ICE still does not open the
+datachannel, so use two Macs for the real link proof.
 
 The `offer-ssh` mode runs the local side, starts `answer-stdio` on a peer over
 SSH, exchanges SDP plus optional explicit ICE candidates over stdin/stdout, and
