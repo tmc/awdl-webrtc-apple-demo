@@ -169,6 +169,26 @@ Move the printed `OFFER ...` line to the answer process, then move the printed
 over the selected LAN, Thunderbolt, or AWDL ICE path, independent of how the two
 signal lines were transported.
 
+The experimental `answer-bonjour` and `offer-bonjour` modes use
+Network.framework Bonjour advertise/browse plus Network.framework TCP for the
+same `OFFER`/`ANSWER` wire signal:
+
+```sh
+GOWORK=off go run . -profile awdl -backend network -pion-net -mdns disabled \
+  -candidate-policy auto -mode answer-bonjour -signal-name awdl-webrtc-peer-a \
+  -timeout 90s
+
+GOWORK=off go run . -profile awdl -backend network -pion-net -mdns disabled \
+  -candidate-policy auto -mode offer-bonjour -signal-peer awdl-webrtc-peer-a \
+  -timeout 90s
+```
+
+The answer side advertises `_awdl-webrtc-signal._tcp` with the same version,
+commit, and supported-mode TXT metadata used by the link monitor. The current
+local same-host smoke confirms Bonjour browse/resolve and external TCP
+reachability, but `NWConnection` self-dialing that Bonjour endpoint stays in
+`NWConnectionStatePreparing`; use two Macs for the real proof.
+
 The `offer-ssh` mode runs the local side, starts `answer-stdio` on a peer over
 SSH, exchanges SDP plus optional explicit ICE candidates over stdin/stdout, and
 waits for a WebRTC datachannel `ping`/`pong`:
@@ -330,7 +350,7 @@ AWDL_DEMO_NETWORK_TRACE=1 go run . -profile awdl -backend network -mode udp-perf
 The Network.framework backend proves Pion ICE gathering, raw UDP echo/perf, and
 remote WebRTC datachannel exchange over LAN, Thunderbolt, and AWDL. The
 `nwtransport` path demonstrates a Pion-native `transport.Net` backend for LAN,
-Thunderbolt, and AWDL WebRTC. AWDL still needs explicit SSH signaling plus
-link-local candidate publication through `-candidate-policy auto` or `raw`; the
-mDNS-only AWDL `SetNet` path gathers candidates but does not open the remote
-datachannel here.
+Thunderbolt, and AWDL WebRTC. AWDL still needs explicit signaling plus
+link-local candidate publication through `-candidate-policy auto` or `raw`;
+the mDNS-only AWDL `SetNet` path gathers candidates but does not open the
+remote datachannel here.
