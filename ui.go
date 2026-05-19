@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -26,9 +28,15 @@ import (
 const (
 	linkHealthServiceType = "_awdl-webrtc._tcp"
 	linkHealthDomain      = "local."
+	linkHealthModes       = "discover,discover-wait,ui,udp,udp-perf,udp-latency,webrtc"
 )
 
 var linkHealthProfileOrder = []string{"thunderbolt", "awdl", "lan"}
+
+var (
+	linkHealthGitCommitOnce sync.Once
+	linkHealthGitCommit     string
+)
 
 type linkHealthConfig struct {
 	Backend       udpBackend
@@ -95,6 +103,7 @@ type linkHealthPeer struct {
 	Name        string
 	ServiceName string
 	Addrs       map[string]string
+	Meta        map[string]string
 	LastSeen    time.Time
 }
 
@@ -183,6 +192,7 @@ type linkHealthDiscoveryPeer struct {
 	Name        string            `json:"name,omitempty"`
 	ServiceName string            `json:"service_name,omitempty"`
 	Addrs       map[string]string `json:"addrs,omitempty"`
+	Meta        map[string]string `json:"meta,omitempty"`
 }
 
 type linkHealthDiscoveryLink struct {
@@ -272,6 +282,7 @@ func linkHealthDiscoveryRecordFromSnapshot(snapshot linkHealthSnapshot) linkHeal
 			Name:        snapshot.Peer.Name,
 			ServiceName: snapshot.Peer.ServiceName,
 			Addrs:       snapshot.Peer.Addrs,
+			Meta:        snapshot.Peer.Meta,
 		},
 		Links: make([]linkHealthDiscoveryLink, 0, len(snapshot.Links)),
 	}
@@ -601,8 +612,16 @@ func (a *linkHealthAgent) publish() {
 func (a *linkHealthAgent) metadata() map[string]string {
 	host, _ := os.Hostname()
 	meta := map[string]string{
-		"id":   a.serviceName,
-		"name": host,
+		"id":      a.serviceName,
+		"name":    host,
+		"modes":   linkHealthModes,
+		"version": linkHealthVersion(),
+	}
+	if commit := linkHealthCommit(); commit != "" {
+		meta["commit"] = commit
+	}
+	if modified := linkHealthVCSModified(); modified != "" {
+		meta["vcs_modified"] = modified
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -615,6 +634,58 @@ func (a *linkHealthAgent) metadata() map[string]string {
 		meta[name+"_if"] = endpoint.iface.Name
 	}
 	return meta
+}
+
+func linkHealthVersion() string {
+	if strings.TrimSpace(buildVersion) != "" && buildVersion != "dev" {
+		return buildVersion
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+			return info.Main.Version
+		}
+	}
+	if strings.TrimSpace(buildVersion) == "" {
+		return "dev"
+	}
+	return buildVersion
+}
+
+func linkHealthCommit() string {
+	if strings.TrimSpace(buildCommit) != "" {
+		return buildCommit
+	}
+	if value := linkHealthBuildSetting("vcs.revision"); value != "" {
+		return value
+	}
+	return linkHealthGitRevision()
+}
+
+func linkHealthVCSModified() string {
+	return linkHealthBuildSetting("vcs.modified")
+}
+
+func linkHealthBuildSetting(key string) string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == key {
+			return setting.Value
+		}
+	}
+	return ""
+}
+
+func linkHealthGitRevision() string {
+	linkHealthGitCommitOnce.Do(func() {
+		out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+		if err == nil {
+			linkHealthGitCommit = strings.TrimSpace(string(out))
+		}
+	})
+	return linkHealthGitCommit
 }
 
 func (a *linkHealthAgent) samplePreferred(ctx context.Context, peer linkHealthPeer) linkHealthSample {
@@ -919,6 +990,7 @@ func linkHealthPeerFromResult(result objectivec.Object) linkHealthPeer {
 		Name:        name,
 		ServiceName: service,
 		Addrs:       addrs,
+		Meta:        meta,
 		LastSeen:    time.Now(),
 	}
 }

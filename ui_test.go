@@ -69,6 +69,7 @@ func TestLinkHealthDiscoveryRecordFromSnapshot(t *testing.T) {
 			Name:        "peer",
 			ServiceName: "peer-service",
 			Addrs:       map[string]string{"awdl": "[fe80::1%awdl0]:1234"},
+			Meta:        map[string]string{"version": "vtest", "commit": "abcdef"},
 		},
 		Links: []linkHealthLink{
 			{
@@ -97,6 +98,9 @@ func TestLinkHealthDiscoveryRecordFromSnapshot(t *testing.T) {
 	if record.Peer.ID != "peer-id" || record.Peer.Addrs["awdl"] == "" {
 		t.Fatalf("peer = %#v", record.Peer)
 	}
+	if record.Peer.Meta["version"] != "vtest" || record.Peer.Meta["commit"] != "abcdef" {
+		t.Fatalf("peer metadata = %#v", record.Peer.Meta)
+	}
 	if len(record.Links) != 2 {
 		t.Fatalf("links = %d, want 2", len(record.Links))
 	}
@@ -105,6 +109,28 @@ func TestLinkHealthDiscoveryRecordFromSnapshot(t *testing.T) {
 	}
 	if record.Links[1].Error != "no address" {
 		t.Fatalf("link 1 = %#v", record.Links[1])
+	}
+}
+
+func TestLinkHealthMetadataIncludesBuildFields(t *testing.T) {
+	oldVersion, oldCommit := buildVersion, buildCommit
+	buildVersion, buildCommit = "vtest", "abcdef"
+	t.Cleanup(func() {
+		buildVersion, buildCommit = oldVersion, oldCommit
+	})
+	agent := newLinkHealthAgent(linkHealthConfig{})
+	meta := agent.metadata()
+	if meta["id"] != agent.serviceName {
+		t.Fatalf("id = %q, want %q", meta["id"], agent.serviceName)
+	}
+	if meta["version"] != "vtest" {
+		t.Fatalf("version = %q, want vtest", meta["version"])
+	}
+	if meta["commit"] != "abcdef" {
+		t.Fatalf("commit = %q, want abcdef", meta["commit"])
+	}
+	if meta["modes"] != linkHealthModes {
+		t.Fatalf("modes = %q, want %q", meta["modes"], linkHealthModes)
 	}
 }
 

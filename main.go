@@ -128,6 +128,11 @@ var networkConnect = networkConnectPolicy{
 
 var traceWebRTC bool
 
+var (
+	buildVersion = "dev"
+	buildCommit  = ""
+)
+
 func main() {
 	profileName := flag.String("profile", "awdl", "link profile: awdl, thunderbolt, or lan")
 	ifaceName := flag.String("iface", "", "network interface to constrain ICE candidates to; default depends on profile")
