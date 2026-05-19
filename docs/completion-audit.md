@@ -57,6 +57,7 @@ UDP now passes both directions with Network.framework path evidence. The demo
 now has opt-in `-webrtc-trace` instrumentation for Pion signaling, ICE
 gathering, ICE connection, peer connection, datachannel transitions, and the
 wire-signaling split between SDP candidates and explicit `ICECandidateInit`
-records. The next remote run should use that trace while isolating whether the
-AWDL timeout is in candidate installation, connectivity checks, DTLS/SCTP, or
-Network.framework reads.
+records. Timeout snapshots also include local-candidate, remote-candidate, and
+candidate-pair stats from Pion `GetStats`. The next remote run should use that
+trace while isolating whether the AWDL timeout is in candidate installation,
+connectivity checks, DTLS/SCTP, or Network.framework reads.

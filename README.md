@@ -113,7 +113,10 @@ candidate publication, `-candidate-policy raw` to force it, or the legacy
 For WebRTC diagnostics, set `-webrtc-trace` or `AWDL_DEMO_WEBRTC_TRACE=1`.
 The trace prints Pion signaling, ICE gathering, ICE connection, peer
 connection, datachannel transitions, and the wire-signaling candidate split
-between SDP candidates and explicit `ICECandidateInit` records.
+between SDP candidates and explicit `ICECandidateInit` records. Timeout
+snapshots include Pion local-candidate, remote-candidate, and candidate-pair
+stats so failed runs show which ICE pairs were checked and whether requests or
+responses moved.
 
 The `pair` mode creates two local PeerConnections and exchanges a datachannel
 payload over the constrained interface. On this host, Thunderbolt Bridge pairing
