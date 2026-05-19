@@ -10,9 +10,11 @@ completion checklist.
 The reusable Network.framework surfaces are:
 
 - `github.com/tmc/apple/x/network/nwpacket`: a Network.framework
-  `net.PacketConn`, consumed from released `github.com/tmc/apple v0.6.7`.
+  `net.PacketConn`, consumed from the sibling `../apple` checkout through
+  `go.work` during active development.
 - `github.com/tmc/apple-pion/nwtransport`: a small Pion `transport.Net`
-  adapter, consumed from released `github.com/tmc/apple-pion v0.1.3`. It
+  adapter, consumed from the sibling `../apple-pion` checkout through
+  `go.work`. It
   routes concrete UDP listeners, configured wildcard UDP listeners, and UDP
   dials through Network.framework, while leaving DNS, TCP, unconstrained
   wildcard UDP, and TURN/STUN helper traffic outside that selected UDP surface
@@ -66,21 +68,20 @@ go run . -profile thunderbolt -iface en1 -backend network -mode gather -timeout 
 To open the SwiftUI link monitor, run the same command on both Macs:
 
 ```sh
-GOWORK=off go run . -mode ui -backend network -ui-interval 3s -ui-count 20 -ui-window 4
+go run . -mode ui -backend network -ui-interval 3s -ui-count 20 -ui-window 4
 ```
 
 The UI advertises a Bonjour service, starts local UDP echo listeners for
 Thunderbolt, AWDL, and LAN when those paths are available, and samples the peer
 in that order. A Thunderbolt path with no replies is marked unavailable for
-that sample and the monitor immediately tries AWDL, then LAN. The monitor is
-intended to keep using the published `github.com/tmc/apple v0.6.7` bindings;
-`GOWORK=off` avoids accidentally resolving a sibling checkout.
+that sample and the monitor immediately tries AWDL, then LAN. The checked-in
+`go.work` file intentionally resolves the local sibling Apple bindings.
 
 For a terminal-friendly view of the same Bonjour/TXT discovery data, use
 `discover` mode:
 
 ```sh
-GOWORK=off go run . -mode discover -backend network -timeout 10s -ui-interval 1s
+go run . -mode discover -backend network -timeout 10s -ui-interval 1s
 ```
 
 It prints JSON records with the local Thunderbolt, AWDL, and LAN listener
@@ -92,8 +93,8 @@ manual WebRTC signaling flow.
 To wait for one peer record and exit, use:
 
 ```sh
-GOWORK=off go run . -mode discover-wait -backend network -timeout 30s
-GOWORK=off go run . -mode discover-wait -backend network -discover-peer peer-service-name -timeout 30s
+go run . -mode discover-wait -backend network -timeout 30s
+go run . -mode discover-wait -backend network -discover-peer peer-service-name -timeout 30s
 ```
 
 `-discover-peer` matches the peer id, host name, or Bonjour service name. An
@@ -153,14 +154,14 @@ SSH to the peer is unavailable or when testing another discovery/signaling
 transport. Start the answer side on one Mac:
 
 ```sh
-GOWORK=off go run . -profile awdl -backend network -pion-net -mdns disabled \
+go run . -profile awdl -backend network -pion-net -mdns disabled \
   -candidate-policy auto -mode answer-stdio -timeout 90s
 ```
 
 Start the offer side on the other Mac:
 
 ```sh
-GOWORK=off go run . -profile awdl -backend network -pion-net -mdns disabled \
+go run . -profile awdl -backend network -pion-net -mdns disabled \
   -candidate-policy auto -mode offer-stdio -timeout 90s
 ```
 
@@ -174,11 +175,11 @@ Network.framework Bonjour advertise/browse plus Network.framework TCP for the
 same `OFFER`/`ANSWER` wire signal:
 
 ```sh
-GOWORK=off go run . -profile awdl -backend network -pion-net -mdns disabled \
+go run . -profile awdl -backend network -pion-net -mdns disabled \
   -candidate-policy auto -mode answer-bonjour -signal-name awdl-webrtc-peer-a \
   -timeout 90s
 
-GOWORK=off go run . -profile awdl -backend network -pion-net -mdns disabled \
+go run . -profile awdl -backend network -pion-net -mdns disabled \
   -candidate-policy auto -mode offer-bonjour -signal-peer awdl-webrtc-peer-a \
   -timeout 90s
 ```
@@ -223,11 +224,21 @@ To rerun the two-host productization matrix, use:
 ```sh
 CANDIDATE_POLICY=auto \
 REQUIRE_PATHS=1 \
+WEBRTC_ATTEMPTS=3 \
+WEBRTC_RETRY_DELAY=3 \
+DURATION=5s \
+TRIALS=3 \
+WINDOW=8 \
+STREAMS=2 \
+TIMEOUT=90s \
+LISTEN_IDLE_TIMEOUT=3s \
+REMOTE_READY_TIMEOUT=30 \
+REMOTE_STEP_READY_TIMEOUT=30 \
 SSH_TARGET=tmc2@10.0.18.249 \
-  REMOTE_BIN=/Volumes/Shared/awdl-webrtc-apple-demo-bin \
-  OUTPUT=/tmp/awdl-webrtc-matrix.txt \
-  SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-summary.md \
-  scripts/remote-matrix-bundle.sh
+REMOTE_BIN=/Volumes/Shared/awdl-webrtc-apple-demo-bin-workspace \
+OUTPUT=/tmp/awdl-webrtc-matrix.txt \
+SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-summary.md \
+scripts/remote-matrix-bundle.sh
 ```
 
 Before the matrix, capture the interface and route state from both Macs:
@@ -279,7 +290,7 @@ to sender runs; LAN defaults to `en0`, AWDL defaults to `awdl0`, and
 Thunderbolt uses `THUNDERBOLT_PATH_INTERFACE` when set. Set `SSH_HOST` when the
 address to probe differs from the SSH target host string.
 
-Before cutting releases or removing local module replaces, run:
+For a published-module release gate, run:
 
 ```sh
 scripts/release-preflight.sh
@@ -293,6 +304,10 @@ remote checks:
 ```sh
 GITHUB_RESOLVE_IP=140.82.116.3 scripts/release-preflight.sh
 ```
+
+This release gate is intentionally separate from the current `go.work` proof
+path, which builds against sibling `../apple` and `../apple-pion` checkouts
+without publishing new tags.
 
 The `udp` mode opens two ordinary Go UDP sockets on the selected interface,
 sets Darwin `IP_BOUND_IF` or `IPV6_BOUND_IF` for AWDL or scoped IPv6 sockets,
