@@ -12,7 +12,7 @@ The reusable Network.framework surfaces are:
 - `github.com/tmc/apple/x/network/nwpacket`: a Network.framework
   `net.PacketConn`, consumed from released `github.com/tmc/apple v0.6.7`.
 - `github.com/tmc/apple-pion/nwtransport`: a small Pion `transport.Net`
-  adapter, consumed from released `github.com/tmc/apple-pion v0.1.2`. It
+  adapter, consumed from released `github.com/tmc/apple-pion v0.1.3`. It
   routes concrete UDP listeners, configured wildcard UDP listeners, and UDP
   dials through Network.framework, while leaving DNS, TCP, unconstrained
   wildcard UDP, and TURN/STUN helper traffic outside that selected UDP surface
