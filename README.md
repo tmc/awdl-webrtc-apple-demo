@@ -88,6 +88,17 @@ addresses plus the newest discovered peer metadata. This mode is useful for
 checking whether both Macs can see each other before running the UI or the
 manual WebRTC signaling flow.
 
+To wait for one peer record and exit, use:
+
+```sh
+GOWORK=off go run . -mode discover-wait -backend network -timeout 30s
+GOWORK=off go run . -mode discover-wait -backend network -discover-peer peer-service-name -timeout 30s
+```
+
+`-discover-peer` matches the peer id, host name, or Bonjour service name. An
+empty value accepts the newest discovered peer. Discovery modes write setup
+diagnostics to stderr and JSON records to stdout.
+
 The `-backend` flag selects `go` or `network`.
 
 - `go` uses ordinary Darwin UDP sockets. It is the stable throughput and

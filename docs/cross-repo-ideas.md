@@ -33,8 +33,8 @@ Useful demo changes:
   Bonjour/TXT metadata as the SwiftUI monitor and prints JSON records with
   local Thunderbolt, AWDL, and LAN listener addresses plus the newest peer.
   The remaining enhancement is adding version/git metadata to that TXT record.
-- Add `-mode discover-wait` that waits for a named peer and prints a machine-
-  readable peer record.
+- `-mode discover-wait` waits for the newest peer or a peer matched by id, name,
+  or Bonjour service name, prints one JSON record on stdout, and exits.
 - Teach `remote-matrix.sh` to optionally use discovery output instead of hard-
   coded addresses for AWDL and Thunderbolt.
 - Keep multicast out of the core WebRTC path; it is useful as a diagnostic
