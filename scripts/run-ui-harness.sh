@@ -24,6 +24,7 @@ discover_timeout=${DISCOVER_TIMEOUT:-30s}
 discover_interval=${DISCOVER_INTERVAL:-1s}
 discover_peer=${DISCOVER_PEER:-}
 preflight_discovery=${PREFLIGHT_DISCOVERY:-1}
+launch_ui=${LAUNCH_UI:-1}
 cleanup_stale_processes=${CLEAN_STALE_PROCESSES:-1}
 remote_log=${REMOTE_LOG:-}
 output=${OUTPUT:-}
@@ -186,6 +187,23 @@ wait_for_remote_discovery_log() {
 	done
 }
 
+first_remote_discovery_json() {
+	grep -m1 '"kind":"link_health_discovery"' "$remote_log_tmp" || true
+}
+
+remote_discovery_service_name() {
+	local json
+	json=$(first_remote_discovery_json)
+	if [[ -z $json ]]; then
+		return
+	fi
+	if command -v jq >/dev/null 2>&1; then
+		printf '%s\n' "$json" | jq -r '.service_name // empty' 2>/dev/null || true
+		return
+	fi
+	printf '%s\n' "$json" | sed -n 's/.*"service_name":"\([^"]*\)".*/\1/p'
+}
+
 printf '## ui harness config\n'
 printf 'ssh_target=%s\n' "$ssh_target"
 printf 'backend=%s\n' "$backend"
@@ -197,6 +215,7 @@ printf 'ui_interval=%s\n' "$ui_interval"
 printf 'ui_count=%s\n' "$ui_count"
 printf 'ui_window=%s\n' "$ui_window"
 printf 'preflight_discovery=%s\n' "$preflight_discovery"
+printf 'launch_ui=%s\n' "$launch_ui"
 printf 'output=%s\n' "$output"
 
 diagnose_local_reachability
@@ -233,10 +252,15 @@ ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" \
 remote_ssh_pid=$!
 printf 'remote_ssh_pid=%s\n' "$remote_ssh_pid"
 wait_for_remote_discovery_log
+remote_service_name=$(remote_discovery_service_name)
+printf 'remote_service_name=%s\n' "$remote_service_name"
+if [[ -z $discover_peer ]]; then
+	discover_peer=$remote_service_name
+fi
 
 if truthy "$preflight_discovery"; then
 	printf '## local discovery preflight\n'
-	local discover_args=(
+	discover_args=(
 		"$local_bin"
 		-mode discover-wait
 		-backend "$backend"
@@ -247,6 +271,12 @@ if truthy "$preflight_discovery"; then
 		discover_args+=(-discover-peer "$discover_peer")
 	fi
 	run "${discover_args[@]}"
+fi
+
+if ! truthy "$launch_ui"; then
+	printf '## skip local SwiftUI monitor\n'
+	printf 'LAUNCH_UI=%s, remote publisher and local discovery preflight completed\n' "$launch_ui"
+	exit 0
 fi
 
 cat <<EOF
