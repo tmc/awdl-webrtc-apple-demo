@@ -20,6 +20,7 @@ message=${MESSAGE:-callback}
 connect_timeout=${CONNECT_TIMEOUT:-5}
 remote_ready_timeout=${REMOTE_READY_TIMEOUT:-0}
 remote_ready_interval=${REMOTE_READY_INTERVAL:-5}
+remote_step_ready_timeout=${REMOTE_STEP_READY_TIMEOUT:-0}
 nw_connect_timeout=${NW_CONNECT_TIMEOUT:-2s}
 nw_connect_retries=${NW_CONNECT_RETRIES:-2}
 candidate_policy=${CANDIDATE_POLICY:-auto}
@@ -51,6 +52,12 @@ esac
 case "$remote_ready_interval" in
 '' | *[!0-9]*)
 	printf 'REMOTE_READY_INTERVAL must be an integer number of seconds, got %q\n' "$remote_ready_interval" >&2
+	exit 2
+	;;
+esac
+case "$remote_step_ready_timeout" in
+'' | *[!0-9]*)
+	printf 'REMOTE_STEP_READY_TIMEOUT must be an integer number of seconds, got %q\n' "$remote_step_ready_timeout" >&2
 	exit 2
 	;;
 esac
@@ -213,23 +220,25 @@ wait_for_callback_peer() {
 	return 1
 }
 
-remote() {
+ssh_run() {
 	local cmd=$1
 	run ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$cmd"
 }
 
 wait_for_remote_ready() {
-	if ((remote_ready_timeout == 0)); then
-		remote "true"
+	local ready_timeout=${1:-$remote_ready_timeout}
+	local label=${2:-remote readiness}
+	if ((ready_timeout == 0)); then
+		ssh_run "true"
 		return
 	fi
-	local deadline=$((SECONDS + remote_ready_timeout))
+	local deadline=$((SECONDS + ready_timeout))
 	local attempt=0
 	local rc=1
 	while :; do
 		attempt=$((attempt + 1))
-		printf 'remote readiness attempt=%d remaining=%ds\n' "$attempt" "$((deadline - SECONDS))"
-		if remote "true"; then
+		printf '%s attempt=%d remaining=%ds\n' "$label" "$attempt" "$((deadline - SECONDS))"
+		if ssh_run "true"; then
 			return 0
 		else
 			rc=$?
@@ -247,6 +256,19 @@ wait_for_remote_ready() {
 		fi
 		sleep "$sleep_for"
 	done
+}
+
+prepare_remote_step() {
+	if ((remote_step_ready_timeout == 0)); then
+		return 0
+	fi
+	wait_for_remote_ready "$remote_step_ready_timeout" "$1 remote readiness"
+}
+
+remote() {
+	local cmd=$1
+	prepare_remote_step "remote command" || return
+	ssh_run "$cmd"
 }
 
 remote_network_args() {
@@ -412,6 +434,10 @@ run_remote_listener_then_local_sender() {
 	local log
 	log=$(mktemp)
 	printf '## %s local-to-remote UDP perf\n' "$profile"
+	prepare_remote_step "$profile local-to-remote UDP perf listener" || {
+		rm -f "$log"
+		return 1
+	}
 	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -listen-idle-timeout $(sq "$listen_idle_timeout") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
 	local listener_pid=$!
 	local peer
@@ -440,6 +466,10 @@ run_remote_listener_then_local_latency() {
 	local log
 	log=$(mktemp)
 	printf '## %s local-to-remote UDP latency\n' "$profile"
+	prepare_remote_step "$profile local-to-remote UDP latency listener" || {
+		rm -f "$log"
+		return 1
+	}
 	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -listen-idle-timeout $(sq "$listen_idle_timeout") -perf-json -timeout $(sq "$timeout")" >"$log" 2>&1 &
 	local listener_pid=$!
 	local peer
@@ -475,6 +505,10 @@ run_bidirectional_perf() {
 	local_send_log=$(mktemp)
 	remote_send_log=$(mktemp)
 	printf '## %s bidirectional UDP perf\n' "$profile"
+	if ! prepare_remote_step "$profile bidirectional remote listener"; then
+		rm -f "$local_log" "$remote_log" "$local_send_log" "$remote_send_log"
+		return 1
+	fi
 	"$local_bin" -profile "$profile" -backend network -mode udp-perf-listen -count "$count" "${local_args[@]}" -warmup "$warmup" -trials "$trials" -streams "$streams" -perf-json -timeout "$timeout" >"$local_log" 2>&1 &
 	local local_listener_pid=$!
 	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-perf-listen -count $(sq "$count")${duration_arg} -warmup $(sq "$warmup") -trials $(sq "$trials") -streams $(sq "$streams") -listen-idle-timeout $(sq "$listen_idle_timeout") -perf-json -timeout $(sq "$timeout")" >"$remote_log" 2>&1 &
@@ -541,6 +575,10 @@ run_remote_callback_then_local_request() {
 	local log
 	log=$(mktemp)
 	printf '## %s callback local-to-remote request\n' "$profile"
+	prepare_remote_step "$profile callback local-to-remote listener" || {
+		rm -f "$log"
+		return 1
+	}
 	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" "$(sq "$remote_bin") -profile $(sq "$profile") -backend network$(remote_network_args) -mode udp-callback-listen -timeout $(sq "$timeout")" >"$log" 2>&1 &
 	local listener_pid=$!
 	local peer
@@ -591,6 +629,7 @@ printf 'timeout=%s\n' "$timeout"
 printf 'connect_timeout=%s\n' "$connect_timeout"
 printf 'remote_ready_timeout=%s\n' "$remote_ready_timeout"
 printf 'remote_ready_interval=%s\n' "$remote_ready_interval"
+printf 'remote_step_ready_timeout=%s\n' "$remote_step_ready_timeout"
 printf 'nw_connect_timeout=%s\n' "$nw_connect_timeout"
 printf 'nw_connect_retries=%s\n' "$nw_connect_retries"
 printf 'candidate_policy=%s\n' "$candidate_policy"

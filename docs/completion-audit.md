@@ -11,7 +11,7 @@ do not complete requirements that need a fresh two-host run.
 | Release preflight | PASS: `GITHUB_RESOLVE_IP=140.82.116.3 scripts/release-preflight.sh` passed on 2026-05-19; use `GITHUB_RESOLVE_IP` when local DNS cannot resolve GitHub. |
 | Published modules | PASS: the demo resolves `github.com/tmc/apple v0.6.7` and `github.com/tmc/apple-pion v0.1.3` from the module cache with no local replace. |
 | Published repos | PASS: demo and `apple-pion` HEADs are published at `origin/main`; `apple-pion` is tagged `v0.1.3`. |
-| Remote reachability | UNSTABLE: the 2026-05-19 retry reached `10.0.18.249` by ICMP, waited through initial TCP/22 timeouts, copied the binary after SSH recovered briefly, then lost SSH during the matrix with `Operation timed out`, `Host is down`, and `No route to host`. `REMOTE_READY_TIMEOUT` can now wait for SSH before setup, but the two-host trace run still needs a stable peer. |
+| Remote reachability | UNSTABLE: the 2026-05-19 retry reached `10.0.18.249` by ICMP, waited through initial TCP/22 timeouts, copied the binary after SSH recovered briefly, then lost SSH during the matrix with `Operation timed out`, `Host is down`, and `No route to host`. `REMOTE_READY_TIMEOUT` can wait for SSH before setup, and `REMOTE_STEP_READY_TIMEOUT` can now wait before each later remote sender/listener command, but the two-host trace run still needs a stable enough peer. |
 | Remote matrix | PARTIAL: `CANDIDATE_POLICY=auto REQUIRE_PATHS=1 SSH_TARGET=tmc2@10.0.18.249 REMOTE_BIN=/Volumes/Shared/awdl-webrtc-apple-demo-bin OUTPUT=/tmp/awdl-webrtc-matrix-v011.txt SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-v011.md scripts/remote-matrix-bundle.sh` completed all probes and failed only `awdl Pion transport.Net WebRTC`. LAN and Thunderbolt Pion-native WebRTC passed; LAN/Thunderbolt/AWDL raw Network.framework UDP perf, latency, and callback probes passed with path evidence. |
 
 ## Latest Retry Evidence
@@ -79,6 +79,8 @@ SSH_TARGET=tmc2@10.0.18.249 \
 
 CANDIDATE_POLICY=auto \
 REQUIRE_PATHS=1 \
+REMOTE_READY_TIMEOUT=30 \
+REMOTE_STEP_READY_TIMEOUT=30 \
 SSH_TARGET=tmc2@10.0.18.249 \
 REMOTE_BIN=/Volumes/Shared/awdl-webrtc-apple-demo-bin \
 OUTPUT=/tmp/awdl-webrtc-matrix.txt \
@@ -86,6 +88,7 @@ SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-summary.md \
 scripts/remote-matrix-bundle.sh
 
 DURATION=10s TRIALS=5 WINDOW=8 STREAMS=2 CANDIDATE_POLICY=auto REQUIRE_PATHS=1 \
+REMOTE_READY_TIMEOUT=30 REMOTE_STEP_READY_TIMEOUT=30 \
 SSH_TARGET=tmc2@10.0.18.249 \
 REMOTE_BIN=/Volumes/Shared/awdl-webrtc-apple-demo-bin \
 OUTPUT=/tmp/awdl-webrtc-matrix-long.txt \
