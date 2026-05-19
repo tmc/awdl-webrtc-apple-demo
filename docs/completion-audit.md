@@ -53,6 +53,10 @@ scripts/remote-matrix-bundle.sh
 ```
 
 The remaining incomplete item is AWDL Pion-native WebRTC reliability. Raw AWDL
-UDP now passes both directions with Network.framework path evidence, so the next
-debug pass should instrument Pion ICE, DTLS, SCTP, and Network.framework reads
-around the AWDL datachannel timeout.
+UDP now passes both directions with Network.framework path evidence. The demo
+now has opt-in `-webrtc-trace` instrumentation for Pion signaling, ICE
+gathering, ICE connection, peer connection, datachannel transitions, and the
+wire-signaling split between SDP candidates and explicit `ICECandidateInit`
+records. The next remote run should use that trace while isolating whether the
+AWDL timeout is in candidate installation, connectivity checks, DTLS/SCTP, or
+Network.framework reads.

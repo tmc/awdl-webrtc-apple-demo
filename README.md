@@ -110,6 +110,11 @@ without SDP rewriting. Use `-candidate-policy mdns` to suppress explicit
 candidate publication, `-candidate-policy raw` to force it, or the legacy
 `-raw-candidates` alias for older scripts.
 
+For WebRTC diagnostics, set `-webrtc-trace` or `AWDL_DEMO_WEBRTC_TRACE=1`.
+The trace prints Pion signaling, ICE gathering, ICE connection, peer
+connection, datachannel transitions, and the wire-signaling candidate split
+between SDP candidates and explicit `ICECandidateInit` records.
+
 The `pair` mode creates two local PeerConnections and exchanges a datachannel
 payload over the constrained interface. On this host, Thunderbolt Bridge pairing
 passes. AWDL same-host pairing is not useful because AWDL traffic is peer-link
