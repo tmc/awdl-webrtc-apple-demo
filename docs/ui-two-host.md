@@ -127,12 +127,40 @@ Rendering note: the bad layout came from using `Frame(width, 0)` on text cells.
 explicit row heights, shortened endpoint text, and middle truncation for long
 addresses.
 
+## Harness Smoke - 2026-05-19
+
+The non-visual harness smoke passed from clean commit
+`d7da303b7fc0a4a1ae655cbc8b4833c745528097`:
+
+```sh
+LAUNCH_UI=0 \
+OUTPUT=/tmp/awdl-webrtc-ui-harness-smoke-clean.txt \
+REMOTE_LOG=/tmp/awdl-webrtc-ui-harness-remote-clean.log \
+  scripts/run-ui-harness.sh
+```
+
+Result:
+
+| Check | Evidence |
+| --- | --- |
+| Remote publisher | `remote_service_name=MacBook-m4small-local-18016`. |
+| Local preflight | `discover-wait` targeted `MacBook-m4small-local-18016` and returned `status:"peer found"`. |
+| Version metadata | Remote TXT metadata reported `commit:"d7da303b7fc0a4a1ae655cbc8b4833c745528097"` and `vcs_modified:"false"`. |
+| Thunderbolt | Local `bridge0` `169.254.61.91:59340`; remote `169.254.82.92:52174`; state `ready`. |
+| AWDL | Local `awdl0` `[fe80::c814:f7ff:fe87:2c83%awdl0]:61523`; remote `[fe80::4c41:acff:fec5:96f1%awdl0]:55995`; state `ready`. |
+| LAN | Local `en0` `10.0.199.147:50025`; remote `10.0.18.249:58068`; state `ready`. |
+
+This proves the harness can build, install, publish, and preflight the exact
+remote peer it just started. It intentionally skipped the SwiftUI window, so it
+does not prove physical Thunderbolt-removal fallback.
+
 ## Current State
 
 Peer availability is no longer the blocker: Bonjour signaling, live headless
 discovery, and selected-link soak passed on two Macs. A local visible UI
 active-path check also passed while fed by a remote headless publisher. The
-new harness makes the final proof repeatable, but it does not replace the human
-observation. The remaining UI proof is a two-live-Mac visual run plus physical
-Thunderbolt removal, confirming that the visible active path moves from
-Thunderbolt to AWDL without restarting either process.
+new harness makes the final proof repeatable and its non-visual smoke passes,
+but it does not replace the human observation. The remaining UI proof is a
+two-live-Mac visual run plus physical Thunderbolt removal, confirming that the
+visible active path moves from Thunderbolt to AWDL without restarting either
+process.
