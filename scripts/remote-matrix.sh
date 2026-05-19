@@ -27,6 +27,7 @@ candidate_policy=${CANDIDATE_POLICY:-auto}
 webrtc_trace=${WEBRTC_TRACE:-0}
 listen_idle_timeout=${LISTEN_IDLE_TIMEOUT:-2s}
 require_paths=${REQUIRE_PATHS:-0}
+cleanup_stale_processes=${CLEAN_STALE_PROCESSES:-1}
 lan_path_interface=${LAN_PATH_INTERFACE:-en0}
 awdl_path_interface=${AWDL_PATH_INTERFACE:-awdl0}
 thunderbolt_path_interface=${THUNDERBOLT_PATH_INTERFACE:-}
@@ -79,6 +80,37 @@ run_diag() {
 	printf ' %q' "$@"
 	printf '\n'
 	"$@" 2>&1 || printf 'command failed exit=%d\n' "$?"
+}
+
+bin_process_pattern() {
+	printf '^%s([[:space:]]|$)' "$1"
+}
+
+cleanup_local_bin_processes() {
+	case "$cleanup_stale_processes" in
+	0 | false | FALSE | no | NO | off | OFF)
+		return
+		;;
+	esac
+	if command -v pkill >/dev/null 2>&1; then
+		pkill -f "$(bin_process_pattern "$local_bin")" 2>/dev/null || true
+	fi
+}
+
+cleanup_remote_bin_processes() {
+	case "$cleanup_stale_processes" in
+	0 | false | FALSE | no | NO | off | OFF)
+		return
+		;;
+	esac
+	ssh -o "ConnectTimeout=$connect_timeout" -o BatchMode=yes "$ssh_target" \
+		"if command -v pkill >/dev/null 2>&1; then pkill -f $(sq "$(bin_process_pattern "$remote_bin")") 2>/dev/null || true; fi" \
+		>/dev/null 2>&1 || true
+}
+
+cleanup_matrix_processes() {
+	cleanup_local_bin_processes
+	cleanup_remote_bin_processes
 }
 
 addr_host() {
@@ -636,6 +668,7 @@ printf 'candidate_policy=%s\n' "$candidate_policy"
 printf 'webrtc_trace=%s\n' "$webrtc_trace"
 printf 'listen_idle_timeout=%s\n' "$listen_idle_timeout"
 printf 'require_paths=%s\n' "$require_paths"
+printf 'cleanup_stale_processes=%s\n' "$cleanup_stale_processes"
 printf 'lan_path_interface=%s\n' "$lan_path_interface"
 printf 'awdl_path_interface=%s\n' "$awdl_path_interface"
 printf 'thunderbolt_path_interface=%s\n' "$thunderbolt_path_interface"
@@ -653,6 +686,9 @@ else
 	printf 'FAIL: remote reachability exit=%d\n' "$rc" >&2
 	exit "$rc"
 fi
+
+trap cleanup_matrix_processes EXIT
+cleanup_matrix_processes
 
 printf '## build local binary\n'
 run go build -o "$local_bin" .
