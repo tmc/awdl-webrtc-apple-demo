@@ -10,7 +10,7 @@ do not complete requirements that need a fresh two-host run.
 | --- | --- |
 | Release preflight | PASS: `scripts/release-preflight.sh` passes; use `GITHUB_RESOLVE_IP=140.82.116.3` when local DNS cannot resolve GitHub. |
 | Published modules | PASS: the demo resolves `github.com/tmc/apple v0.6.7` and `github.com/tmc/apple-pion v0.1.1` from the module cache with no local replace. |
-| Published repos | PASS: `apple-pion` is published at `origin/main` and tagged `v0.1.1`; demo publication is pending for this docs/update stack. |
+| Published repos | PASS: demo and `apple-pion` HEADs are published at `origin/main`; `apple-pion` is tagged `v0.1.1`. |
 | Remote reachability | PASS: `ssh -o ConnectTimeout=5 -o BatchMode=yes tmc2@10.0.18.249 true` succeeds. |
 | Remote matrix | PARTIAL: `CANDIDATE_POLICY=auto REQUIRE_PATHS=1 SSH_TARGET=tmc2@10.0.18.249 REMOTE_BIN=/Volumes/Shared/awdl-webrtc-apple-demo-bin OUTPUT=/tmp/awdl-webrtc-matrix-v011.txt SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-v011.md scripts/remote-matrix-bundle.sh` completed all probes and failed only `awdl Pion transport.Net WebRTC`. LAN and Thunderbolt Pion-native WebRTC passed; LAN/Thunderbolt/AWDL raw Network.framework UDP perf, latency, and callback probes passed with path evidence. |
 
