@@ -2,7 +2,10 @@
 
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLinkHealthMetadataSignatureStable(t *testing.T) {
 	a := linkHealthMetadataSignature(map[string]string{
@@ -33,6 +36,75 @@ func TestFormatLinkRate(t *testing.T) {
 		if got := formatLinkRate(tt.bps); got != tt.want {
 			t.Fatalf("formatLinkRate(%v) = %q, want %q", tt.bps, got, tt.want)
 		}
+	}
+}
+
+func TestNormalizeLinkHealthConfig(t *testing.T) {
+	cfg := normalizeLinkHealthConfig(linkHealthConfig{})
+	if cfg.Interval != 3*time.Second {
+		t.Fatalf("interval = %s, want 3s", cfg.Interval)
+	}
+	if cfg.Count != 20 {
+		t.Fatalf("count = %d, want 20", cfg.Count)
+	}
+	if cfg.Size != 1200 {
+		t.Fatalf("size = %d, want 1200", cfg.Size)
+	}
+	if cfg.Window != 4 {
+		t.Fatalf("window = %d, want 4", cfg.Window)
+	}
+	if cfg.PacketTimeout != time.Second {
+		t.Fatalf("packet timeout = %s, want 1s", cfg.PacketTimeout)
+	}
+}
+
+func TestLinkHealthDiscoveryRecordFromSnapshot(t *testing.T) {
+	updated := time.Date(2026, 5, 19, 5, 0, 0, 123, time.UTC)
+	record := linkHealthDiscoveryRecordFromSnapshot(linkHealthSnapshot{
+		ServiceName: "local-1",
+		Status:      "peer found",
+		Updated:     updated,
+		Peer: linkHealthPeer{
+			ID:          "peer-id",
+			Name:        "peer",
+			ServiceName: "peer-service",
+			Addrs:       map[string]string{"awdl": "[fe80::1%awdl0]:1234"},
+		},
+		Links: []linkHealthLink{
+			{
+				Profile:    "awdl",
+				Interface:  "awdl0",
+				LocalAddr:  "[fe80::2%awdl0]:5678",
+				RemoteAddr: "[fe80::1%awdl0]:1234",
+				State:      "ready",
+			},
+			{
+				Profile: "thunderbolt",
+				State:   "unavailable",
+				Error:   "no address",
+			},
+		},
+	})
+	if record.Kind != "link_health_discovery" {
+		t.Fatalf("kind = %q, want link_health_discovery", record.Kind)
+	}
+	if record.ServiceName != "local-1" || record.Status != "peer found" {
+		t.Fatalf("record header = %#v", record)
+	}
+	if record.Updated != updated.Format(time.RFC3339Nano) {
+		t.Fatalf("updated = %q", record.Updated)
+	}
+	if record.Peer.ID != "peer-id" || record.Peer.Addrs["awdl"] == "" {
+		t.Fatalf("peer = %#v", record.Peer)
+	}
+	if len(record.Links) != 2 {
+		t.Fatalf("links = %d, want 2", len(record.Links))
+	}
+	if record.Links[0].Profile != "awdl" || record.Links[0].State != "ready" {
+		t.Fatalf("link 0 = %#v", record.Links[0])
+	}
+	if record.Links[1].Error != "no address" {
+		t.Fatalf("link 1 = %#v", record.Links[1])
 	}
 }
 

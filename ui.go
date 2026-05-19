@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -112,21 +113,7 @@ type linkHealthAgent struct {
 
 func runLinkHealthUI(ctx context.Context, cfg linkHealthConfig) error {
 	runtime.LockOSThread()
-	if cfg.Interval <= 0 {
-		cfg.Interval = 3 * time.Second
-	}
-	if cfg.Count <= 0 {
-		cfg.Count = 20
-	}
-	if cfg.Size <= 0 {
-		cfg.Size = 1200
-	}
-	if cfg.Window <= 0 {
-		cfg.Window = 4
-	}
-	if cfg.PacketTimeout <= 0 {
-		cfg.PacketTimeout = time.Second
-	}
+	cfg = normalizeLinkHealthConfig(cfg)
 	if err := macgo.Start(macgo.NewConfig().
 		WithAppName("AWDL WebRTC Link Monitor").
 		WithBundleID("com.github.tmc.awdl-webrtc-apple-demo").
@@ -161,6 +148,111 @@ func runLinkHealthUI(ctx context.Context, cfg linkHealthConfig) error {
 		app.menu(),
 	)
 	return nil
+}
+
+func normalizeLinkHealthConfig(cfg linkHealthConfig) linkHealthConfig {
+	if cfg.Interval <= 0 {
+		cfg.Interval = 3 * time.Second
+	}
+	if cfg.Count <= 0 {
+		cfg.Count = 20
+	}
+	if cfg.Size <= 0 {
+		cfg.Size = 1200
+	}
+	if cfg.Window <= 0 {
+		cfg.Window = 4
+	}
+	if cfg.PacketTimeout <= 0 {
+		cfg.PacketTimeout = time.Second
+	}
+	return cfg
+}
+
+type linkHealthDiscoveryRecord struct {
+	Kind        string                    `json:"kind"`
+	ServiceName string                    `json:"service_name"`
+	Status      string                    `json:"status"`
+	Updated     string                    `json:"updated,omitempty"`
+	Peer        linkHealthDiscoveryPeer   `json:"peer,omitempty"`
+	Links       []linkHealthDiscoveryLink `json:"links"`
+}
+
+type linkHealthDiscoveryPeer struct {
+	ID          string            `json:"id,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	ServiceName string            `json:"service_name,omitempty"`
+	Addrs       map[string]string `json:"addrs,omitempty"`
+}
+
+type linkHealthDiscoveryLink struct {
+	Profile    string `json:"profile"`
+	Interface  string `json:"interface,omitempty"`
+	LocalAddr  string `json:"local_addr,omitempty"`
+	RemoteAddr string `json:"remote_addr,omitempty"`
+	State      string `json:"state"`
+	Error      string `json:"error,omitempty"`
+}
+
+func runLinkDiscovery(ctx context.Context, cfg linkHealthConfig) error {
+	cfg = normalizeLinkHealthConfig(cfg)
+	agent := newLinkHealthAgent(cfg)
+	agent.browser = newLinkHealthBrowser(agent.serviceName)
+	if err := agent.browser.Start(); err != nil {
+		return err
+	}
+	defer agent.browser.Stop()
+	defer agent.Close()
+
+	enc := json.NewEncoder(os.Stdout)
+	tick := time.NewTicker(cfg.Interval)
+	defer tick.Stop()
+	for {
+		agent.refresh(ctx)
+		agent.publish()
+		peer := agent.browser.FirstPeer()
+		status := "waiting for peer"
+		if peer.ID != "" {
+			status = "peer found"
+		}
+		if err := enc.Encode(linkHealthDiscoveryRecordFromSnapshot(agent.snapshot(status, peer))); err != nil {
+			return fmt.Errorf("write discovery record: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tick.C:
+		}
+	}
+}
+
+func linkHealthDiscoveryRecordFromSnapshot(snapshot linkHealthSnapshot) linkHealthDiscoveryRecord {
+	record := linkHealthDiscoveryRecord{
+		Kind:        "link_health_discovery",
+		ServiceName: snapshot.ServiceName,
+		Status:      snapshot.Status,
+		Peer: linkHealthDiscoveryPeer{
+			ID:          snapshot.Peer.ID,
+			Name:        snapshot.Peer.Name,
+			ServiceName: snapshot.Peer.ServiceName,
+			Addrs:       snapshot.Peer.Addrs,
+		},
+		Links: make([]linkHealthDiscoveryLink, 0, len(snapshot.Links)),
+	}
+	if !snapshot.Updated.IsZero() {
+		record.Updated = snapshot.Updated.Format(time.RFC3339Nano)
+	}
+	for _, link := range snapshot.Links {
+		record.Links = append(record.Links, linkHealthDiscoveryLink{
+			Profile:    link.Profile,
+			Interface:  link.Interface,
+			LocalAddr:  link.LocalAddr,
+			RemoteAddr: link.RemoteAddr,
+			State:      link.State,
+			Error:      link.Error,
+		})
+	}
+	return record
 }
 
 func (a *linkHealthApp) apply(snapshot linkHealthSnapshot) {

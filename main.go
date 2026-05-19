@@ -134,7 +134,7 @@ func main() {
 	backendName := flag.String("backend", string(udpBackendGo), "UDP backend: go or network")
 	pionNet := flag.Bool("pion-net", false, "use Network.framework as Pion transport.Net instead of ICE UDP mux")
 	mdnsName := flag.String("mdns", "query-and-gather", "ICE mDNS mode: query-and-gather, query-only, or disabled")
-	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-stdio, offer-ssh, udp, udp-listen, udp-send, udp-callback-listen, udp-callback-request, udp-perf, udp-perf-listen, udp-perf-send, udp-latency, udp-latency-send, or ui")
+	mode := flag.String("mode", "check", "mode: check, gather, pair, answer-stdio, offer-stdio, offer-ssh, discover, udp, udp-listen, udp-send, udp-callback-listen, udp-callback-request, udp-perf, udp-perf-listen, udp-perf-send, udp-latency, udp-latency-send, or ui")
 	timeout := flag.Duration("timeout", 8*time.Second, "timeout for WebRTC and UDP modes")
 	peerAddr := flag.String("peer", "", "remote UDP address for udp-send, such as [fe80::1%awdl0]:12345")
 	sshTarget := flag.String("ssh", "", "ssh target for offer-ssh, such as tmc2@10.0.18.249")
@@ -273,6 +273,17 @@ func main() {
 	case "offer-ssh":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
 			return offerSSH(ctx, profile, iface, backend, *pionNet, mdnsMode, candidatePolicy, *timeout, *sshTarget, *remoteBin)
+		})
+	case "discover":
+		runWithTimeout(*timeout, func(ctx context.Context) error {
+			return runLinkDiscovery(ctx, linkHealthConfig{
+				Backend:       backend,
+				Interval:      *uiInterval,
+				Count:         *uiCount,
+				Size:          *size,
+				Window:        *uiWindow,
+				PacketTimeout: *packetTimeout,
+			})
 		})
 	case "udp":
 		runWithTimeout(*timeout, func(ctx context.Context) error {
