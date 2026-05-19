@@ -146,7 +146,7 @@ func runLinkHealthUI(ctx context.Context, cfg linkHealthConfig) error {
 	agent := newLinkHealthAgent(cfg)
 	go agent.Run(ctx, app.apply)
 	swiftui.RunWithMenuBar(
-		swiftui.AppConfig{Title: "AWDL WebRTC Link Monitor", Width: 820, Height: 620},
+		swiftui.AppConfig{Title: "AWDL WebRTC Link Monitor", Width: 900, Height: 660},
 		app.window(),
 		swiftui.MenuBarConfig{
 			Label:        "Link -",
@@ -342,9 +342,9 @@ func (a *linkHealthApp) apply(snapshot linkHealthSnapshot) {
 }
 
 func (a *linkHealthApp) window() swiftui.View {
-	return swiftui.ScrollView(swiftui.VStackSpaced(14,
+	return swiftui.ScrollView(swiftui.VStackSpaced(12,
 		swiftui.HStack(
-			swiftui.Label("AWDL WebRTC Link Monitor", "antenna.radiowaves.left.and.right").
+			swiftui.Label("Link Monitor", "antenna.radiowaves.left.and.right").
 				Font(swiftui.FontTitle).
 				FontWeight(swiftui.WeightBold),
 			swiftui.Spacer(),
@@ -355,7 +355,7 @@ func (a *linkHealthApp) window() swiftui.View {
 					AsView()
 			}),
 		),
-		swiftui.GroupBox("Active Path", swiftui.HStackSpaced(28,
+		swiftui.GroupBox("Active Path", swiftui.HStackSpaced(24,
 			metricBlock("Path", a.active),
 			metricBlock("Bandwidth", a.rate),
 			metricBlock("Peer", a.peer),
@@ -394,31 +394,14 @@ func (a *linkHealthApp) menu() swiftui.View {
 
 func (a *linkHealthApp) linksView() swiftui.View {
 	snapshot := a.current()
-	rows := make([]swiftui.Viewable, 0, len(snapshot.Links)+1)
-	rows = append(rows, swiftui.HStackSpaced(12,
-		headerText("Profile").Frame(110, 0),
-		headerText("Interface").Frame(100, 0),
-		headerText("Local").Frame(210, 0),
-		headerText("Remote").Frame(210, 0),
-		headerText("State").Frame(120, 0),
-	))
+	rows := make([]swiftui.Viewable, 0, len(snapshot.Links))
 	for _, link := range snapshot.Links {
-		state := link.State
-		if link.Error != "" {
-			state = link.Error
-		}
-		rows = append(rows, swiftui.HStackSpaced(12,
-			swiftui.Text(link.Profile).Font(swiftui.FontCallout).FontWeight(swiftui.WeightSemibold).AsView().Frame(110, 0),
-			monoSmall(link.Interface).Frame(100, 0),
-			monoSmall(link.LocalAddr).Frame(210, 0),
-			monoSmall(link.RemoteAddr).Frame(210, 0),
-			swiftui.Text(state).Font(swiftui.FontCaption).ForegroundStyleNamed("secondary").AsView().Frame(120, 0),
-		))
+		rows = append(rows, linkRow(link))
 	}
 	if len(snapshot.Links) == 0 {
 		rows = append(rows, swiftui.Text("No local link listeners are available yet.").Font(swiftui.FontCaption).ForegroundStyleNamed("secondary"))
 	}
-	return swiftui.VStackSpaced(8, rows...)
+	return swiftui.VStackSpaced(10, rows...)
 }
 
 func (a *linkHealthApp) samplesView() swiftui.View {
@@ -431,12 +414,12 @@ func (a *linkHealthApp) samplesView() swiftui.View {
 	}
 	rows := make([]swiftui.Viewable, 0, len(snapshot.Samples)+1)
 	rows = append(rows, swiftui.HStackSpaced(12,
-		headerText("Time").Frame(80, 0),
-		headerText("Path").Frame(100, 0),
-		headerText("Bandwidth").Frame(110, 0),
-		headerText("Loss").Frame(90, 0),
-		headerText("RTT avg").Frame(100, 0),
-		headerText("Result").Frame(270, 0),
+		headerText("Time").Frame(70, 18),
+		headerText("Path").Frame(96, 18),
+		headerText("Bandwidth").Frame(112, 18),
+		headerText("Loss").Frame(72, 18),
+		headerText("RTT").Frame(82, 18),
+		headerText("Result").Frame(190, 18),
 	))
 	for i := len(snapshot.Samples) - 1; i >= 0 && len(rows) < 13; i-- {
 		sample := snapshot.Samples[i]
@@ -445,12 +428,12 @@ func (a *linkHealthApp) samplesView() swiftui.View {
 			result = sample.Error
 		}
 		rows = append(rows, swiftui.HStackSpaced(12,
-			monoSmall(sample.Time.Format("15:04:05")).Frame(80, 0),
-			swiftui.Text(sample.Profile).Font(swiftui.FontCallout).AsView().Frame(100, 0),
-			monoSmall(formatLinkRate(sample.BitrateBPS)).Frame(110, 0),
-			monoSmall(fmt.Sprintf("%.1f%%", sample.Loss)).Frame(90, 0),
-			monoSmall(formatDuration(sample.RTTAvg)).Frame(100, 0),
-			swiftui.Text(result).Font(swiftui.FontCaption).ForegroundStyleNamed("secondary").AsView().Frame(270, 0),
+			monoSmall(sample.Time.Format("15:04:05")).Frame(70, 20),
+			swiftui.Text(profileLabel(sample.Profile)).Font(swiftui.FontCallout).LineLimit(1).AsView().Frame(96, 20),
+			monoSmall(formatLinkRate(sample.BitrateBPS)).Frame(112, 20),
+			monoSmall(fmt.Sprintf("%.1f%%", sample.Loss)).Frame(72, 20),
+			monoSmall(formatDuration(sample.RTTAvg)).Frame(82, 20),
+			valueText(result).Frame(190, 20),
 		))
 	}
 	return swiftui.VStackSpaced(8, rows...)
@@ -465,7 +448,12 @@ func (a *linkHealthApp) current() linkHealthSnapshot {
 func metricBlock(label string, value *swiftui.StringState) swiftui.View {
 	return swiftui.VStackSpaced(4,
 		swiftui.Text(label).Font(swiftui.FontCaption).ForegroundStyleNamed("secondary"),
-		swiftui.TextFromString(value).Font(swiftui.FontTitle3).FontWeight(swiftui.WeightSemibold).MonospacedDigit(),
+		swiftui.TextFromString(value).
+			Font(swiftui.FontTitle3).
+			FontWeight(swiftui.WeightSemibold).
+			MonospacedDigit().
+			LineLimit(1).
+			TruncationMode(swiftui.TruncationModeMiddle),
 	)
 }
 
@@ -474,10 +462,104 @@ func headerText(text string) swiftui.View {
 }
 
 func monoSmall(text string) swiftui.View {
+	return monoText(text).AsView()
+}
+
+func monoText(text string) swiftui.TextView {
 	if text == "" {
 		text = "-"
 	}
-	return swiftui.Text(text).Font(swiftui.FontCaption).MonospacedDigit().AsView()
+	return swiftui.Text(text).
+		Font(swiftui.FontCaption).
+		MonospacedDigit().
+		LineLimit(1).
+		TruncationMode(swiftui.TruncationModeMiddle)
+}
+
+func valueText(text string) swiftui.View {
+	if text == "" {
+		text = "-"
+	}
+	return swiftui.Text(text).
+		Font(swiftui.FontCaption).
+		ForegroundStyleNamed("secondary").
+		LineLimit(1).
+		TruncationMode(swiftui.TruncationModeMiddle).
+		AsView()
+}
+
+func linkRow(link linkHealthLink) swiftui.View {
+	state := link.State
+	if link.Error != "" {
+		state = link.Error
+	}
+	rate := link.LastRate
+	if rate == "" {
+		rate = "-"
+	}
+	return swiftui.VStackSpaced(4,
+		swiftui.HStackSpaced(10,
+			swiftui.Text(profileLabel(link.Profile)).
+				Font(swiftui.FontCallout).
+				FontWeight(swiftui.WeightSemibold).
+				LineLimit(1).
+				AsView().
+				Frame(110, 22),
+			monoSmall(link.Interface).Frame(84, 22),
+			valueText(state).Frame(112, 22),
+			swiftui.Spacer(),
+			monoSmall(rate).Frame(112, 22),
+		),
+		swiftui.HStackSpaced(8,
+			headerText("Local").Frame(44, 18),
+			monoSmall(shortEndpoint(link.LocalAddr)).Frame(220, 18),
+			headerText("Peer").Frame(36, 18),
+			monoSmall(shortEndpoint(link.RemoteAddr)).Frame(220, 18),
+			swiftui.Spacer(),
+		),
+	).MaxFrame(-1, 0).Padding(6)
+}
+
+func profileLabel(profile string) string {
+	switch profile {
+	case "awdl":
+		return "AWDL"
+	case "lan":
+		return "LAN"
+	case "thunderbolt":
+		return "Thunderbolt"
+	case "":
+		return "-"
+	default:
+		return profile
+	}
+}
+
+func shortEndpoint(addr string) string {
+	if addr == "" {
+		return "-"
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = strings.Trim(addr, "[]")
+		port = ""
+	}
+	host = strings.Trim(host, "[]")
+	scope := ""
+	if base, s, ok := strings.Cut(host, "%"); ok {
+		host = base
+		scope = "%" + s
+	}
+	if strings.Contains(host, ":") && len(host) > 18 {
+		host = host[:10] + "..." + host[len(host)-4:]
+	}
+	if scope != "" {
+		host += scope
+	}
+	if port != "" {
+		return host + ":" + port
+	}
+	return host
 }
 
 func newLinkHealthAgent(cfg linkHealthConfig) *linkHealthAgent {

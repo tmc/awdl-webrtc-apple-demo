@@ -40,6 +40,42 @@ func TestFormatLinkRate(t *testing.T) {
 	}
 }
 
+func TestShortEndpoint(t *testing.T) {
+	tests := []struct {
+		addr string
+		want string
+	}{
+		{"", "-"},
+		{"10.0.199.147:57718", "10.0.199.147:57718"},
+		{"169.254.61.91:51052", "169.254.61.91:51052"},
+		{"[fe80::c814:f7ff:fe87:2c83%awdl0]:52714", "fe80::c814...2c83%awdl0:52714"},
+		{"[fe80::4c41:acff:fec5:96f1%awdl0]", "fe80::4c41...96f1%awdl0"},
+	}
+	for _, tt := range tests {
+		if got := shortEndpoint(tt.addr); got != tt.want {
+			t.Fatalf("shortEndpoint(%q) = %q, want %q", tt.addr, got, tt.want)
+		}
+	}
+}
+
+func TestProfileLabel(t *testing.T) {
+	tests := []struct {
+		profile string
+		want    string
+	}{
+		{"thunderbolt", "Thunderbolt"},
+		{"awdl", "AWDL"},
+		{"lan", "LAN"},
+		{"", "-"},
+		{"other", "other"},
+	}
+	for _, tt := range tests {
+		if got := profileLabel(tt.profile); got != tt.want {
+			t.Fatalf("profileLabel(%q) = %q, want %q", tt.profile, got, tt.want)
+		}
+	}
+}
+
 func TestNormalizeLinkHealthConfig(t *testing.T) {
 	cfg := normalizeLinkHealthConfig(linkHealthConfig{})
 	if cfg.Interval != 3*time.Second {
