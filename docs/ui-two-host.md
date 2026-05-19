@@ -27,12 +27,21 @@ Useful knobs:
 | `UI_COUNT` | `20` | Datagrams per UI sample. |
 | `UI_WINDOW` | `4` | In-flight datagram window per UI sample. |
 | `PREFLIGHT_DISCOVERY` | `1` | Runs `discover-wait` locally before opening the UI. |
+| `DISCOVER_PEER` | empty | Optional peer id, host name, or service name for preflight. When empty, the harness targets the current remote publisher's service name. |
+| `LAUNCH_UI` | `1` | Set to `0` to smoke-test remote publishing and local discovery without opening SwiftUI. |
 | `OUTPUT` | empty | Captures the harness transcript with `tee`. |
 | `REMOTE_LOG` | temp file | Optional persistent path for the remote discovery log. |
 
 The harness prints the physical validation steps before opening the UI. Closing
 the SwiftUI window or pressing Ctrl-C tears down the remote publisher and prints
 the remote discovery log.
+
+For a non-visual smoke test of the harness plumbing:
+
+```sh
+LAUNCH_UI=0 OUTPUT=/tmp/awdl-webrtc-ui-harness-smoke.txt \
+  scripts/run-ui-harness.sh
+```
 
 ## Manual UI Run
 
