@@ -2985,7 +2985,20 @@ func newWireSignal(desc webrtc.SessionDescription, policy icepolicy.Policy, loca
 		return wireSignal{Description: desc}
 	}
 	candidates := icepolicy.CandidateInitsFromSDP(desc.SDP, policy, localIP)
+	desc.SDP = withoutSDPCandidateLines(desc.SDP)
 	return wireSignal{Description: desc, Candidates: candidates}
+}
+
+func withoutSDPCandidateLines(sdp string) string {
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(sdp, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "a=candidate:") || trimmed == "a=end-of-candidates" {
+			continue
+		}
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 func setRemoteWireSignal(pc *webrtc.PeerConnection, signal wireSignal, label string) error {

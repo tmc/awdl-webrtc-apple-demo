@@ -249,8 +249,8 @@ func TestNewWireSignalPublishesRawCandidates(t *testing.T) {
 		}, "\n"),
 	}
 	signal := newWireSignal(desc, icepolicy.Policy{RawHostCandidates: true}, net.ParseIP("fe80::1"))
-	if signal.Description.SDP != desc.SDP {
-		t.Fatalf("description SDP changed:\n%s", signal.Description.SDP)
+	if strings.Contains(signal.Description.SDP, "a=candidate:") || strings.Contains(signal.Description.SDP, "a=end-of-candidates") {
+		t.Fatalf("description SDP kept synthetic candidates:\n%s", signal.Description.SDP)
 	}
 	if len(signal.Candidates) != 1 {
 		t.Fatalf("candidates = %d, want 1", len(signal.Candidates))
@@ -263,6 +263,23 @@ func TestNewWireSignalPublishesRawCandidates(t *testing.T) {
 	}
 	if signal.Candidates[0].SDPMLineIndex == nil || *signal.Candidates[0].SDPMLineIndex != 0 {
 		t.Fatalf("candidate m-line = %v, want 0", signal.Candidates[0].SDPMLineIndex)
+	}
+}
+
+func TestWithoutSDPCandidateLines(t *testing.T) {
+	sdp := strings.Join([]string{
+		"v=0",
+		"a=candidate:1 1 udp 2130706431 fd00::1 12345 typ host",
+		"a=mid:0",
+		"a=end-of-candidates",
+		"",
+	}, "\n")
+	got := withoutSDPCandidateLines(sdp)
+	if strings.Contains(got, "a=candidate:") || strings.Contains(got, "a=end-of-candidates") {
+		t.Fatalf("SDP still has candidate lines:\n%s", got)
+	}
+	if !strings.Contains(got, "a=mid:0") {
+		t.Fatalf("SDP lost non-candidate line:\n%s", got)
 	}
 }
 
