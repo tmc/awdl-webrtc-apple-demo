@@ -10,7 +10,7 @@ evidence.
 | Direction/asymmetry cleanup | PASS | The current workspace matrix proves sequential and bidirectional Network.framework UDP perf, latency, and callback probes in both directions on LAN, Thunderbolt, and AWDL with path evidence. `scripts/remote-matrix.sh` records route, ping, TCP/22, `scutil --nwi`, listener-side route, `lsof`, `netstat`, sender-side route checks, simultaneous bidirectional perf, stale-process cleanup, and WebRTC retry attempts. | Longer runs can still tune throughput, but basic direction/asymmetry is resolved for the selected links. |
 | Non-SSH control plane | PARTIAL | `answer-stdio`/`offer-stdio` keep the WebRTC wire signal independent of SSH. `answer-bonjour`/`offer-bonjour` add a Network.framework Bonjour service `_awdl-webrtc-signal._tcp` carrying the same `OFFER`/`ANSWER` payload, with version/commit/mode TXT metadata. The offer side falls back from Bonjour endpoint dialing to `NSNetService` host/port resolution plus Network.framework TCP, and local `-signal-only` signaling exchanged `OFFER`/`ANSWER` with exit 0 on both sides. `scripts/remote-bonjour.sh` now builds the `go.work` workspace, installs the peer binary over SSH, then runs LAN/Thunderbolt/AWDL `signal` and `full` Bonjour phases while capturing remote answer logs and WebRTC trace. | Same-host ICE still timed out after full signaling; the two-host harness is ready, but the current peer was unreachable on 2026-05-19 (`/tmp/awdl-webrtc-bonjour-unreachable-20260519.txt`). |
 | SwiftUI/link-health UI | PARTIAL | `-mode ui` renders the SwiftUI link monitor; `-mode discover` and `-mode discover-wait` expose the same Bonjour/TXT discovery state as JSON; `TestLinkHealthSamplePreferredFallsBackToAWDL` and `TestLinkHealthSamplePreferredSkipsUnavailableThunderbolt` cover Thunderbolt-to-AWDL fallback selection. Local headless discovery found Thunderbolt, AWDL, and LAN listener addresses plus version/commit/modes metadata. | Two-live-Mac visual observation is still blocked on peer availability; use [ui-two-host.md](ui-two-host.md) for the manual validation steps. |
-| Performance hardening | PASS for this proof | `udp-perf` and `udp-perf-send` support fixed-count runs, fixed-duration runs with `-duration`, `-trials`, aggregate trial summaries, bounded in-flight `-window`, and concurrent `-streams`; `udp-latency` and `udp-latency-send` add explicit ping-pong latency output and JSON; stale late replies are ignored until the per-packet deadline instead of aborting; output includes `Lost` and `Loss`; `-perf-json` emits per-trial and aggregate machine-readable result records including `window`, `streams`, `duration_ns`, and Network.framework `paths` when available; `cmd/matrix-summary` renders saved transcripts into compact Markdown tables. `docs/matrix-workspace-20260519.md` records the current 5s x 3-trial x 2-stream matrix. | Longer sweeps are still useful before making stable product throughput claims. |
+| Performance hardening | PASS for this proof | `udp-perf` and `udp-perf-send` support fixed-count runs, fixed-duration runs with `-duration`, `-trials`, aggregate trial summaries, bounded in-flight `-window`, and concurrent `-streams`; `udp-latency` and `udp-latency-send` add explicit ping-pong latency output and JSON; stale late replies are ignored until the per-packet deadline instead of aborting; output includes `Lost` and `Loss`; `-perf-json` emits per-trial and aggregate machine-readable result records including `window`, `streams`, `duration_ns`, and Network.framework `paths` when available; `cmd/matrix-summary` renders saved transcripts into compact Markdown tables. `docs/matrix-workspace-20260519.md` records the current 5s x 3-trial x 2-stream matrix. `scripts/remote-soak.sh` wraps the matrix with 30s x 5-trial defaults for longer runs. | The long-soak harness is ready, but the full soak proof is blocked on peer availability. |
 | Reusable package | PASS | `../apple` provides `github.com/tmc/apple/x/network/nwpacket` with `PathReporter`, outbound readiness retry knobs, and AWDL-scoped listener-source binding; `../apple-pion` provides `github.com/tmc/apple-pion/nwtransport` and `github.com/tmc/apple-pion/icepolicy`; the demo consumes both through `go.work`. | Publish a later release only when the local workspace changes are ready; no new tag was created for this proof. |
 | Workspace module graph | PASS | `go.work` includes `.`, `../apple`, and `../apple-pion`; local gates passed in all three modules before the workspace matrix. | Release preflight remains a separate published-module gate. |
 | Repo hygiene | PASS | Demo changes are split into atomic code commits with docs layered separately; the untracked `awdl-webrtc-apple-demo` binary was removed; unrelated untracked files in `../apple` are preserved. | None for owned files. |
@@ -24,6 +24,7 @@ bash -n scripts/remote-matrix.sh
 bash -n scripts/remote-matrix-bundle.sh
 bash -n scripts/remote-diagnostics.sh
 bash -n scripts/remote-bonjour.sh
+bash -n scripts/remote-soak.sh
 bash -n scripts/release-preflight.sh
 go test ./cmd/matrix-summary
 go run . -profile lan -backend network -mode gather -timeout 8s
@@ -43,6 +44,7 @@ go run . -profile awdl -backend network -pion-net -mdns disabled -candidate-poli
 REMOTE_READY_TIMEOUT=30 PROFILES="lan thunderbolt awdl" PHASES="signal full" \
 SSH_TARGET=tmc2@10.0.18.249 OUTPUT=/tmp/awdl-webrtc-bonjour.txt \
 scripts/remote-bonjour.sh
+SOAK_LABEL=workspace-soak SSH_TARGET=tmc2@10.0.18.249 scripts/remote-soak.sh
 CANDIDATE_POLICY=auto \
 REQUIRE_PATHS=1 \
 WEBRTC_TRACE=0 \
@@ -77,4 +79,5 @@ better measurement/candidate-policy surfaces, a Pion `transport.Net` adapter,
 and current two-host direction checks. LAN, Thunderbolt, and AWDL Pion-native
 WebRTC now pass from the local `go.work` workspace, and raw UDP passes in both
 directions with path evidence. The remaining product work is two-host Bonjour
-signaling and two-live-Mac SwiftUI observation.
+signaling, two-live-Mac SwiftUI observation, and a full long-soak performance
+run.

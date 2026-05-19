@@ -259,6 +259,18 @@ SUMMARY_OUTPUT=/tmp/awdl-webrtc-matrix-summary.md \
 scripts/remote-matrix-bundle.sh
 ```
 
+For longer repeated performance sweeps, use:
+
+```sh
+SOAK_LABEL=workspace-soak \
+SSH_TARGET=tmc2@10.0.18.249 \
+scripts/remote-soak.sh
+```
+
+`remote-soak.sh` wraps the matrix bundle with longer duration/trial defaults and
+writes timestamped raw and Markdown artifacts. See
+[docs/soak-sweeps.md](docs/soak-sweeps.md) for defaults and passing criteria.
+
 Before the matrix, capture the interface and route state from both Macs:
 
 ```sh
