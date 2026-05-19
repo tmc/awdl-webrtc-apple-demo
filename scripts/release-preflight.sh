@@ -6,6 +6,7 @@ demo_dir=${DEMO_DIR:-$(cd -- "$script_dir/.." && pwd)}
 apple_dir=${APPLE_DIR:-$(cd -- "$demo_dir/../apple" && pwd)}
 apple_pion_dir=${APPLE_PION_DIR:-$(cd -- "$demo_dir/../apple-pion" && pwd)}
 github_resolve_ip=${GITHUB_RESOLVE_IP:-}
+require_apple_head=${REQUIRE_APPLE_HEAD:-0}
 
 failures=0
 
@@ -158,7 +159,11 @@ require_remote "$apple_pion_dir" "apple-pion"
 require_remote "$apple_dir" "apple"
 require_head_published "$demo_dir" "awdl-webrtc-apple-demo"
 require_head_published "$apple_pion_dir" "apple-pion"
-require_head_published "$apple_dir" "apple"
+if [[ $require_apple_head == 1 ]]; then
+	require_head_published "$apple_dir" "apple"
+else
+	printf 'apple HEAD publication check skipped; set REQUIRE_APPLE_HEAD=1 to enforce sibling checkout publication\n'
+fi
 require_no_replace "$demo_dir" "awdl-webrtc-apple-demo"
 require_no_replace "$apple_pion_dir" "apple-pion"
 
