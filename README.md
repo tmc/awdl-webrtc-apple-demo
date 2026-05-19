@@ -188,7 +188,9 @@ commit, and supported-mode TXT metadata used by the link monitor. The current
 local same-host smoke confirms Bonjour browse/resolve and exchanges the signal
 lines by falling back from the Bonjour endpoint to `NSNetService` host/port
 resolution plus Network.framework TCP. Same-host ICE still does not open the
-datachannel, so use two Macs for the real link proof.
+datachannel, so use two Macs for the real link proof. Add `-signal-only` on
+both sides to exit successfully after the WebRTC `OFFER`/`ANSWER` exchange
+when you only want to verify the Bonjour control plane.
 
 The `offer-ssh` mode runs the local side, starts `answer-stdio` on a peer over
 SSH, exchanges SDP plus optional explicit ICE candidates over stdin/stdout, and
