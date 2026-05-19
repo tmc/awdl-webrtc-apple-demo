@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"net"
 	"strings"
@@ -629,6 +630,27 @@ func TestRunUDPEchoPerfCountsReadTimeoutsAsLoss(t *testing.T) {
 	}
 	if conn.writes != 3 {
 		t.Fatalf("writes = %d, want 3", conn.writes)
+	}
+}
+
+func TestUDPEchoOnceIgnoresStaleReply(t *testing.T) {
+	stale := make([]byte, 16)
+	binary.BigEndian.PutUint64(stale[:8], 0)
+	conn := &echoPacketConn{
+		packets: [][]byte{stale},
+		addr:    &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 9},
+	}
+	send := make([]byte, 16)
+	recv := make([]byte, 16)
+	ok, err := udpEchoOnce(context.Background(), conn, conn.addr, send, recv, 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("udpEchoOnce reported loss after stale reply")
+	}
+	if conn.writes != 1 {
+		t.Fatalf("writes = %d, want 1", conn.writes)
 	}
 }
 

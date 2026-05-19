@@ -2012,21 +2012,23 @@ func udpEchoOnce(ctx context.Context, conn net.PacketConn, addr net.Addr, send, 
 	if _, err := conn.WriteTo(send, addr); err != nil {
 		return false, fmt.Errorf("write %s: %w", addr, err)
 	}
-	_ = conn.SetReadDeadline(packetDeadline(ctx, packetTimeout))
-	n, from, err := conn.ReadFrom(recv)
-	if err != nil {
-		if isTimeout(err) && ctx.Err() == nil {
-			return false, nil
+	readDeadline := packetDeadline(ctx, packetTimeout)
+	for {
+		_ = conn.SetReadDeadline(readDeadline)
+		n, from, err := conn.ReadFrom(recv)
+		if err != nil {
+			if isTimeout(err) && ctx.Err() == nil {
+				return false, nil
+			}
+			return false, fmt.Errorf("read: %w", err)
 		}
-		return false, fmt.Errorf("read: %w", err)
+		if n != len(send) {
+			return false, fmt.Errorf("reply from %s has size %d, want %d", from, n, len(send))
+		}
+		if got := binary.BigEndian.Uint64(recv[:8]); got == uint64(seq) {
+			return true, nil
+		}
 	}
-	if n != len(send) {
-		return false, fmt.Errorf("reply from %s has size %d, want %d", from, n, len(send))
-	}
-	if got := binary.BigEndian.Uint64(recv[:8]); got != uint64(seq) {
-		return false, fmt.Errorf("reply sequence = %d, want %d", got, seq)
-	}
-	return true, nil
 }
 
 func writeUDPEchoPacket(ctx context.Context, conn net.PacketConn, addr net.Addr, size, seq int) error {
