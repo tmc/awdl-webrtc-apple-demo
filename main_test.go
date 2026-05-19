@@ -323,6 +323,50 @@ func TestSDPCandidateLines(t *testing.T) {
 	}
 }
 
+func TestFormatWebRTCStats(t *testing.T) {
+	report := webrtc.StatsReport{
+		"pair": webrtc.ICECandidatePairStats{
+			Type:              webrtc.StatsTypeCandidatePair,
+			LocalCandidateID:  "local-1",
+			RemoteCandidateID: "remote-1",
+			State:             webrtc.StatsICECandidatePairStateInProgress,
+			Nominated:         true,
+			RequestsSent:      3,
+			RequestsReceived:  4,
+			ResponsesReceived: 1,
+			ResponsesSent:     2,
+			PacketsSent:       5,
+			PacketsReceived:   6,
+		},
+		"local": webrtc.ICECandidateStats{
+			Type:          webrtc.StatsTypeLocalCandidate,
+			ID:            "local-1",
+			IP:            "fd00::1",
+			Port:          12345,
+			Protocol:      "udp",
+			CandidateType: webrtc.ICECandidateTypeHost,
+		},
+		"remote": webrtc.ICECandidateStats{
+			Type:          webrtc.StatsTypeRemoteCandidate,
+			ID:            "remote-1",
+			IP:            "fe80::1",
+			Port:          23456,
+			Protocol:      "udp",
+			CandidateType: webrtc.ICECandidateTypeHost,
+		},
+	}
+	got := formatWebRTCStats(report)
+	for _, want := range []string{
+		"local_candidates=[local-1:host/udp/fd00::1:12345]",
+		"remote_candidates=[remote-1:host/udp/fe80::1:23456]",
+		"candidate_pairs=[local-1>remote-1:in-progress:nominated=true:req=3/4:resp=1/2:pkts=5/6]",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatWebRTCStats() = %q, want substring %q", got, want)
+		}
+	}
+}
+
 func TestUDPCallbackWireRequest(t *testing.T) {
 	data, err := marshalUDPCallbackRequest("[fe80::1%awdl0]:12345", "ping")
 	if err != nil {

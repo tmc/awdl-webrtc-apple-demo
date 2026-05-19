@@ -2695,7 +2695,7 @@ func (d *webRTCDiagnostics) snapshot() string {
 	if dcErr == "" {
 		dcErr = "-"
 	}
-	return fmt.Sprintf("webrtc_state label=%s signaling=%s ice_gathering=%s ice_connection=%s peer_connection=%s datachannel=%s:%s datachannel_error=%s",
+	state := fmt.Sprintf("webrtc_state label=%s signaling=%s ice_gathering=%s ice_connection=%s peer_connection=%s datachannel=%s:%s datachannel_error=%s",
 		d.label,
 		d.pc.SignalingState(),
 		d.pc.ICEGatheringState(),
@@ -2705,6 +2705,11 @@ func (d *webRTCDiagnostics) snapshot() string {
 		dcState,
 		dcErr,
 	)
+	stats := formatWebRTCStats(d.pc.GetStats())
+	if stats == "" {
+		return state
+	}
+	return state + " " + stats
 }
 
 func (d *webRTCDiagnostics) trace(format string, args ...any) {
@@ -2712,6 +2717,56 @@ func (d *webRTCDiagnostics) trace(format string, args ...any) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "webrtctrace: %s "+format+"\n", append([]any{d.label}, args...)...)
+}
+
+func formatWebRTCStats(report webrtc.StatsReport) string {
+	var localCandidates, remoteCandidates, candidatePairs []string
+	for _, stat := range report {
+		switch s := stat.(type) {
+		case webrtc.ICECandidateStats:
+			entry := fmt.Sprintf("%s:%s/%s/%s:%d", s.ID, s.CandidateType, s.Protocol, s.IP, s.Port)
+			if s.Deleted {
+				entry += ":deleted"
+			}
+			switch s.Type {
+			case webrtc.StatsTypeLocalCandidate:
+				localCandidates = append(localCandidates, entry)
+			case webrtc.StatsTypeRemoteCandidate:
+				remoteCandidates = append(remoteCandidates, entry)
+			}
+		case webrtc.ICECandidatePairStats:
+			candidatePairs = append(candidatePairs, fmt.Sprintf("%s>%s:%s:nominated=%t:req=%d/%d:resp=%d/%d:pkts=%d/%d",
+				s.LocalCandidateID,
+				s.RemoteCandidateID,
+				s.State,
+				s.Nominated,
+				s.RequestsSent,
+				s.RequestsReceived,
+				s.ResponsesReceived,
+				s.ResponsesSent,
+				s.PacketsSent,
+				s.PacketsReceived,
+			))
+		}
+	}
+	if len(localCandidates) == 0 && len(remoteCandidates) == 0 && len(candidatePairs) == 0 {
+		return ""
+	}
+	sort.Strings(localCandidates)
+	sort.Strings(remoteCandidates)
+	sort.Strings(candidatePairs)
+	return fmt.Sprintf("webrtc_stats local_candidates=%s remote_candidates=%s candidate_pairs=%s",
+		bracketedList(localCandidates),
+		bracketedList(remoteCandidates),
+		bracketedList(candidatePairs),
+	)
+}
+
+func bracketedList(items []string) string {
+	if len(items) == 0 {
+		return "[]"
+	}
+	return "[" + strings.Join(items, ",") + "]"
 }
 
 func newPeer(iface linkInterface, link *linkWebRTCNet, mdnsMode ice.MulticastDNSMode, candidatePolicy icepolicy.Policy) (*webrtc.PeerConnection, error) {
