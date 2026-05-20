@@ -81,7 +81,10 @@ that sample and the monitor immediately tries AWDL, then LAN. The checked-in
 Use [scripts/run-ui-harness.sh](scripts/run-ui-harness.sh) to launch a remote
 headless publisher plus the local UI for the physical cable-removal proof. See
 [docs/ui-two-host.md](docs/ui-two-host.md) for the two-live-Mac validation steps
-and the local fallback-test coverage.
+and the local fallback-test coverage. The harness builds through the checked-in
+workspace by default; set `BUILD_GOWORK=off` only when intentionally running
+the UI proof against published module versions while a sibling checkout is
+dirty.
 
 For a terminal-friendly view of the same Bonjour/TXT discovery data, use
 `discover` mode:

@@ -7,9 +7,10 @@ or stops replying.
 
 ## One-Command Harness
 
-Use the harness to build the current workspace binary, install it on the remote
-Mac, start the remote headless discovery publisher, run a local discovery
-preflight, and then launch the local SwiftUI monitor:
+Use the harness to build the current binary, install it on the remote Mac, start
+the remote headless discovery publisher, run a local discovery preflight, and
+then launch the local SwiftUI monitor. By default the build uses the checked-in
+`go.work` workspace:
 
 ```sh
 SSH_TARGET=tmc2@10.0.18.249 OUTPUT=/tmp/awdl-webrtc-ui-harness.txt \
@@ -22,6 +23,7 @@ Useful knobs:
 | --- | --- | --- |
 | `SSH_TARGET` | `tmc2@10.0.18.249` | Remote Mac used for the headless discovery publisher. |
 | `REMOTE_BIN` | `/Volumes/Shared/awdl-webrtc-ui-harness-bin` | Remote install path for the built binary. |
+| `BUILD_GOWORK` | inherited Go default | Optional `GOWORK` value used only for the local `go build`; set to `off` for an explicit published-module UI proof when a sibling workspace checkout is dirty. |
 | `REMOTE_PUBLISH_TIMEOUT` | `2h` | Keeps the remote publisher alive long enough for manual testing. |
 | `UI_INTERVAL` | `2s` | SwiftUI link-health sample interval. |
 | `UI_COUNT` | `20` | Datagrams per UI sample. |
@@ -40,6 +42,15 @@ For a non-visual smoke test of the harness plumbing:
 
 ```sh
 LAUNCH_UI=0 OUTPUT=/tmp/awdl-webrtc-ui-harness-smoke.txt \
+  scripts/run-ui-harness.sh
+```
+
+When the checked-in workspace is blocked by a dirty sibling checkout, run the
+UI proof explicitly against published module versions:
+
+```sh
+BUILD_GOWORK=off SSH_TARGET=tmc2@10.0.18.249 \
+  OUTPUT=/tmp/awdl-webrtc-ui-harness-published.txt \
   scripts/run-ui-harness.sh
 ```
 
@@ -154,13 +165,44 @@ This proves the harness can build, install, publish, and preflight the exact
 remote peer it just started. It intentionally skipped the SwiftUI window, so it
 does not prove physical Thunderbolt-removal fallback.
 
+## Published-Module Harness Smoke - 2026-05-20
+
+After `../apple` became dirty and blocked the checked-in `go.work` gate, the
+harness gained `BUILD_GOWORK` so the remaining UI proof can be run against the
+published module graph without repairing the sibling checkout.
+
+Command:
+
+```sh
+LAUNCH_UI=0 BUILD_GOWORK=off \
+OUTPUT=/tmp/awdl-webrtc-ui-harness-published-clean-20260520.txt \
+REMOTE_LOG=/tmp/awdl-webrtc-ui-harness-published-clean-remote-20260520.log \
+  scripts/run-ui-harness.sh
+```
+
+Result:
+
+| Check | Evidence |
+| --- | --- |
+| Build mode | Harness printed `build_gowork=off` and ran `env GOWORK=off go build -o /tmp/awdl-webrtc-ui-harness-bin .`. |
+| Remote publisher | `remote_service_name=MacBook-m4small-local-23960`. |
+| Local preflight | `discover-wait` targeted `MacBook-m4small-local-23960` and returned `status:"peer found"`. |
+| Version metadata | Remote TXT metadata reported `commit:"12883326c56ed02717c4e92c0cd0fb20efc761fc"` and `vcs_modified:"false"`. |
+| Thunderbolt | Local `bridge0` `169.254.61.91:59254`; remote `169.254.199.103:54262`; state `ready`. |
+| AWDL | Local `awdl0` `[fe80::c814:f7ff:fe87:2c83%awdl0]:61772`; remote `[fe80::b489:a5ff:fe5a:5739%awdl0]:60602`; state `ready`. |
+| LAN | Local `en0` `10.0.199.147:63039`; remote `10.0.18.249:60025`; state `ready`. |
+
+This proves the physical UI proof can still be launched from a clean demo
+commit while the sibling workspace is dirty. It remains a non-visual smoke and
+does not prove the physical Thunderbolt-removal fallback.
+
 ## Current State
 
 Peer availability is no longer the blocker: Bonjour signaling, live headless
 discovery, and selected-link soak passed on two Macs. A local visible UI
 active-path check also passed while fed by a remote headless publisher. The
-new harness makes the final proof repeatable and its non-visual smoke passes,
-but it does not replace the human observation. The remaining UI proof is a
-two-live-Mac visual run plus physical Thunderbolt removal, confirming that the
-visible active path moves from Thunderbolt to AWDL without restarting either
-process.
+new harness makes the final proof repeatable, and both the default workspace
+smoke and explicit published-module smoke pass. These smokes do not replace the
+human observation. The remaining UI proof is a two-live-Mac visual run plus
+physical Thunderbolt removal, confirming that the visible active path moves
+from Thunderbolt to AWDL without restarting either process.

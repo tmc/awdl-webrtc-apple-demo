@@ -24,6 +24,9 @@ starts `answer-bonjour` remotely, waits until the Bonjour service is advertised,
 and then runs local `offer-bonjour`. It captures the remote answer log for each
 profile and phase, enables WebRTC trace by default, and cleans stale local and
 remote demo processes whose command line starts with the configured binary path.
+Rerunning this harness requires the checked-in workspace to build; the
+2026-05-19 result below is historical proof while the current dirty `../apple`
+checkout blocks the workspace gate.
 
 ## Current State
 
