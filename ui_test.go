@@ -95,6 +95,22 @@ func TestNormalizeLinkHealthConfig(t *testing.T) {
 	}
 }
 
+func TestLinkHealthWaitingStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"", "waiting for peer"},
+		{" remote-service ", "waiting for remote-service"},
+	}
+	for _, tt := range tests {
+		agent := newLinkHealthAgent(linkHealthConfig{PeerName: tt.name})
+		if got := agent.waitingStatus(); got != tt.want {
+			t.Fatalf("waitingStatus(%q) = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestLinkHealthDiscoveryRecordFromSnapshot(t *testing.T) {
 	updated := time.Date(2026, 5, 19, 5, 0, 0, 123, time.UTC)
 	record := linkHealthDiscoveryRecordFromSnapshot(linkHealthSnapshot{

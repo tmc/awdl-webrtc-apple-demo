@@ -295,4 +295,15 @@ cat <<EOF
 EOF
 
 printf '## start local SwiftUI monitor\n'
-run "$local_bin" -mode ui -backend "$backend" -ui-interval "$ui_interval" -ui-count "$ui_count" -ui-window "$ui_window"
+ui_args=(
+	"$local_bin"
+	-mode ui
+	-backend "$backend"
+	-ui-interval "$ui_interval"
+	-ui-count "$ui_count"
+	-ui-window "$ui_window"
+)
+if [[ -n $discover_peer ]]; then
+	ui_args+=(-discover-peer "$discover_peer")
+fi
+run "${ui_args[@]}"

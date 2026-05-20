@@ -40,6 +40,7 @@ var (
 
 type linkHealthConfig struct {
 	Backend       udpBackend
+	PeerName      string
 	Interval      time.Duration
 	Count         int
 	Size          int
@@ -304,7 +305,8 @@ func linkHealthDiscoveryRecordFromSnapshot(snapshot linkHealthSnapshot) linkHeal
 }
 
 func linkHealthPeerMatchLabel(name string) string {
-	if strings.TrimSpace(name) == "" {
+	name = strings.TrimSpace(name)
+	if name == "" {
 		return "any peer"
 	}
 	return name
@@ -581,7 +583,7 @@ func (a *linkHealthAgent) Run(ctx context.Context, update func(linkHealthSnapsho
 	defer a.Close()
 	a.refresh(ctx)
 	a.publish()
-	update(a.snapshot("waiting for peer", linkHealthPeer{}))
+	update(a.snapshot(a.waitingStatus(), linkHealthPeer{}))
 
 	tick := time.NewTicker(a.cfg.Interval)
 	defer tick.Stop()
@@ -593,9 +595,9 @@ func (a *linkHealthAgent) Run(ctx context.Context, update func(linkHealthSnapsho
 		}
 		a.refresh(ctx)
 		a.publish()
-		peer := a.browser.FirstPeer()
+		peer := a.browser.FirstMatchingPeer(a.cfg.PeerName)
 		if peer.ID == "" {
-			update(a.snapshot("waiting for peer", peer))
+			update(a.snapshot(a.waitingStatus(), peer))
 			continue
 		}
 		sample := a.samplePreferred(ctx, peer)
@@ -606,6 +608,13 @@ func (a *linkHealthAgent) Run(ctx context.Context, update func(linkHealthSnapsho
 		}
 		update(a.snapshot("sampling "+sample.Profile, peer))
 	}
+}
+
+func (a *linkHealthAgent) waitingStatus() string {
+	if strings.TrimSpace(a.cfg.PeerName) == "" {
+		return "waiting for peer"
+	}
+	return "waiting for " + linkHealthPeerMatchLabel(a.cfg.PeerName)
 }
 
 func (a *linkHealthAgent) Close() {

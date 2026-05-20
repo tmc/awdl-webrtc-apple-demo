@@ -165,7 +165,7 @@ func main() {
 	uiInterval := flag.Duration("ui-interval", 3*time.Second, "SwiftUI link monitor sample interval")
 	uiCount := flag.Int("ui-count", 20, "SwiftUI link monitor datagrams per sample")
 	uiWindow := flag.Int("ui-window", 4, "SwiftUI link monitor maximum in-flight datagrams per sample")
-	discoverPeer := flag.String("discover-peer", "", "peer id, name, or service name for discover-wait; empty accepts the newest peer")
+	discoverPeer := flag.String("discover-peer", "", "peer id, name, or service name for discover-wait and ui; empty accepts the newest peer")
 	signalName := flag.String("signal-name", "", "Bonjour service name for answer-bonjour; default is a generated host/pid name")
 	signalPeer := flag.String("signal-peer", "", "Bonjour service name to dial for offer-bonjour")
 	signalOnly := flag.Bool("signal-only", false, "for Bonjour signaling modes, exit after exchanging WebRTC offer/answer without waiting for a datachannel")
@@ -369,6 +369,7 @@ func main() {
 	case "ui":
 		if err := runLinkHealthUI(context.Background(), linkHealthConfig{
 			Backend:       backend,
+			PeerName:      *discoverPeer,
 			Interval:      *uiInterval,
 			Count:         *uiCount,
 			Size:          *size,
