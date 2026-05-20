@@ -196,13 +196,63 @@ This proves the physical UI proof can still be launched from a clean demo
 commit while the sibling workspace is dirty. It remains a non-visual smoke and
 does not prove the physical Thunderbolt-removal fallback.
 
+## Published-Module Visible UI Proof - 2026-05-20
+
+After adding `-discover-peer` to the UI launch path, the harness was rerun
+against the remote publisher it had just started:
+
+```sh
+AWDL_DEMO_NETWORK_TRACE=1 BUILD_GOWORK=off \
+SSH_TARGET=tmc2@10.0.18.249 \
+OUTPUT=/tmp/awdl-webrtc-ui-harness-physical-rerun-20260520.txt \
+REMOTE_LOG=/tmp/awdl-webrtc-ui-harness-physical-rerun-remote-20260520.log \
+  scripts/run-ui-harness.sh
+```
+
+The rendered window was captured at
+`/tmp/awdl-webrtc-ui-rerun-focused-20260520.png`.
+
+Observed visible state:
+
+| UI area | Observation |
+| --- | --- |
+| Active path | `thunderbolt`, peer `MacBook-m4small.local`, with visible samples around 3.64-6.04 Mbit/s. |
+| Possible paths | Thunderbolt `bridge0`, AWDL `awdl0`, and LAN `en0` all showed local and peer endpoints from the selected remote publisher. |
+| Bandwidth history | Rows updated every two seconds with Thunderbolt samples, 0.0% loss, and millisecond RTTs. |
+| Status surface | The macOS menu bar showed `Link thunderbolt ...`, matching the window's active path. |
+
+The same published-module build was then checked headlessly against a fresh
+remote discovery publisher:
+
+```sh
+# Transcript:
+/tmp/awdl-webrtc-ui-direct-probe-20260520.txt
+```
+
+| Path | Peer | Result |
+| --- | --- | --- |
+| Thunderbolt | `169.254.199.103:54294` | 8/8 datagrams, 0.00% loss, path `bridge0/NWInterfaceTypeWired`, 2.52 Mbit/s. |
+| AWDL | `[fe80::b489:a5ff:fe5a:5739%awdl0]:63420` | 8/8 datagrams, 0.00% loss, path `awdl0/NWInterfaceTypeWifi`, 2.07 Mbit/s. |
+| LAN | `10.0.18.249:60361` | 8/8 datagrams, 0.00% loss, path `en0/NWInterfaceTypeWifi`, 1.06 Mbit/s. |
+
+This proves that the current published `github.com/tmc/apple v0.6.7` graph can
+run the visible UI and sample the selected remote publisher over all three
+advertised paths.
+
+Physical Thunderbolt removal was attempted by simulating the link drop with
+`ifconfig bridge0 down`, but macOS returned `ifconfig: down: permission denied`
+for this unprivileged session. The cable-removal fallback therefore remains a
+manual or privileged validation gate, not a software blocker shown by this run.
+
 ## Current State
 
 Peer availability is no longer the blocker: Bonjour signaling, live headless
 discovery, and selected-link soak passed on two Macs. A local visible UI
-active-path check also passed while fed by a remote headless publisher. The
-new harness makes the final proof repeatable, and both the default workspace
-smoke and explicit published-module smoke pass. These smokes do not replace the
-human observation. The remaining UI proof is a two-live-Mac visual run plus
-physical Thunderbolt removal, confirming that the visible active path moves
-from Thunderbolt to AWDL without restarting either process.
+active-path check also passed while fed by a remote headless publisher, and the
+published-module harness now proves the selected-peer UI path from a clean
+commit. The new harness makes the final proof repeatable, and both the default
+workspace smoke and explicit published-module smoke pass. These smokes and the
+visible active-path run do not replace the human or privileged cable-removal
+observation. The remaining UI proof is physical Thunderbolt removal, confirming
+that the visible active path moves from Thunderbolt to AWDL without restarting
+either process.
