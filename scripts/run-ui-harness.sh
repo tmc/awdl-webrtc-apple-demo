@@ -17,6 +17,7 @@ remote_ready_log_timeout=${REMOTE_READY_LOG_TIMEOUT:-20}
 local_bin=${LOCAL_BIN:-/tmp/awdl-webrtc-ui-harness-bin}
 remote_bin=${REMOTE_BIN:-/Volumes/Shared/awdl-webrtc-ui-harness-bin}
 backend=${BACKEND:-network}
+build_gowork=${BUILD_GOWORK:-${GOWORK:-}}
 ui_interval=${UI_INTERVAL:-2s}
 ui_count=${UI_COUNT:-20}
 ui_window=${UI_WINDOW:-4}
@@ -207,6 +208,7 @@ remote_discovery_service_name() {
 printf '## ui harness config\n'
 printf 'ssh_target=%s\n' "$ssh_target"
 printf 'backend=%s\n' "$backend"
+printf 'build_gowork=%s\n' "${build_gowork:-<go default>}"
 printf 'local_bin=%s\n' "$local_bin"
 printf 'remote_bin=%s\n' "$remote_bin"
 printf 'remote_publish_timeout=%s\n' "$remote_publish_timeout"
@@ -230,7 +232,11 @@ cleanup_remote_bin_processes
 printf '## build local binary\n'
 (
 	cd "$repo_dir"
-	run go build -o "$local_bin" .
+	if [[ -n $build_gowork ]]; then
+		run env GOWORK="$build_gowork" go build -o "$local_bin" .
+	else
+		run go build -o "$local_bin" .
+	fi
 )
 
 printf '## install remote binary\n'
