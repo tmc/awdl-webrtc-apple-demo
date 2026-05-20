@@ -11,15 +11,15 @@ evidence.
 | Non-SSH control plane | PASS | `answer-stdio`/`offer-stdio` keep the WebRTC wire signal independent of SSH. `answer-bonjour`/`offer-bonjour` add a Network.framework Bonjour service `_awdl-webrtc-signal._tcp` carrying the same `OFFER`/`ANSWER` payload, with version/commit/mode TXT metadata. The two-host Bonjour harness passed LAN, Thunderbolt, and AWDL in both `signal` and `full` phases; see [bonjour-live-20260519.md](bonjour-live-20260519.md). SSH was used only to install/start the peer process. | None for the two-host Bonjour proof. |
 | SwiftUI/link-health UI | PARTIAL | `-mode ui` renders the SwiftUI link monitor; `-mode discover` and `-mode discover-wait` expose the same Bonjour/TXT discovery state as JSON; `scripts/run-ui-harness.sh` builds the workspace binary, installs it on the remote Mac, starts the remote headless publisher, runs local discovery preflight, and opens the local UI. `LAUNCH_UI=0` passed as a non-visual harness smoke from clean commit `d7da303`, matching the current remote publisher and seeing LAN, Thunderbolt, and AWDL ready. `TestLinkHealthSamplePreferredFallsBackToAWDL` and `TestLinkHealthSamplePreferredSkipsUnavailableThunderbolt` cover Thunderbolt-to-AWDL fallback selection. Two-host headless discovery and the discovery-fed matrix found live LAN, Thunderbolt, and AWDL peer addresses with version/commit/modes metadata; see [discovery-matrix-20260519.md](discovery-matrix-20260519.md). A local visible UI run with a remote headless publisher showed readable rows, Thunderbolt selected as active path, all three possible paths, and updating bandwidth history after the text-layout fix. | A two-live-Mac visual UI session and physical Thunderbolt removal observation are still required; use [ui-two-host.md](ui-two-host.md) for the harness and manual validation steps. |
 | Performance hardening | PASS for this proof | `udp-perf` and `udp-perf-send` support fixed-count runs, fixed-duration runs with `-duration`, `-trials`, aggregate trial summaries, bounded in-flight `-window`, and concurrent `-streams`; `udp-latency` and `udp-latency-send` add explicit ping-pong latency output and JSON; stale late replies are ignored until the per-packet deadline instead of aborting; output includes `Lost` and `Loss`; `-perf-json` emits per-trial and aggregate machine-readable result records including `window`, `streams`, `duration_ns`, and Network.framework `paths` when available; `cmd/matrix-summary` renders saved transcripts into compact Markdown tables. [soak-live-20260519.md](soak-live-20260519.md) records the 30s x 5-trial x 2-stream live soak. | The long discovery-fed probe exposed a publisher lifetime bug; the script default is fixed and a LAN-only 70s discovery-fed smoke passed. |
-| Reusable package | PASS | `../apple` provides `github.com/tmc/apple/x/network/nwpacket` with `PathReporter`, outbound readiness retry knobs, and AWDL-scoped listener-source binding; `../apple-pion` provides `github.com/tmc/apple-pion/nwtransport` and `github.com/tmc/apple-pion/icepolicy`; the demo consumes both through `go.work`. The latest `apple-pion` backend-boundary commits are pushed without publishing tags. | Publish a later release only when the local workspace changes are ready; no new tag was created for this proof. |
-| Workspace module graph | PASS | `go.work` includes `.`, `../apple`, and `../apple-pion`; local gates passed in all three modules before the workspace matrix. | Release preflight remains a separate published-module gate. |
-| Repo hygiene | PASS | Demo changes are split into atomic code commits with docs layered separately; the untracked `awdl-webrtc-apple-demo` binary was removed; unrelated untracked files in `../apple` are preserved. | None for owned files. |
+| Reusable package | PASS for the package split | `../apple` provides `github.com/tmc/apple/x/network/nwpacket` with `PathReporter`, outbound readiness retry knobs, and AWDL-scoped listener-source binding; `../apple-pion` provides `github.com/tmc/apple-pion/nwtransport` and `github.com/tmc/apple-pion/icepolicy`; the historical two-host matrix consumed both through `go.work`. The latest `apple-pion` backend-boundary commits are pushed without publishing tags. | Publish a later release only when the local workspace changes are ready; no new tag was created for this proof. Current `go.work` verification is blocked by dirty `../apple`; see [workspace-gate-20260520.md](workspace-gate-20260520.md). |
+| Workspace module graph | BLOCKED for current local gate | `go.work` includes `.`, `../apple`, and `../apple-pion`; local gates passed in all three modules before the 2026-05-19 workspace matrix. On 2026-05-20, `go test ./...` fails in dirty sibling `../apple/foundation/nsuuid.gen.go` with `undefined: kernel.Uuid_t`. `GOWORK=off go test ./...` and `GOWORK=off go vet ./...` pass against published `github.com/tmc/apple v0.6.7` and `github.com/tmc/apple-pion v0.1.3`. | Preserve `../apple` user-owned changes. Rerun the checked-in workspace gate after that sibling checkout is clean or intentionally repaired. |
+| Repo hygiene | PARTIAL | Demo changes are split into atomic code commits with docs layered separately; the untracked `awdl-webrtc-apple-demo` binary was removed; unrelated dirty files in `../apple` are preserved. | Current owned demo docs update is cleanly scoped, but current workspace verification is blocked by the dirty sibling checkout. |
 
 ## Verification Commands
 
 ```sh
-go test ./...
-go vet ./...
+GOWORK=off go test ./...
+GOWORK=off go vet ./...
 bash -n scripts/remote-matrix.sh
 bash -n scripts/remote-matrix-bundle.sh
 bash -n scripts/remote-diagnostics.sh
@@ -70,15 +70,19 @@ SSH_TARGET=tmc2@10.0.18.249 OUTPUT=/tmp/awdl-webrtc-diagnostics.txt scripts/remo
 ```
 
 `scripts/release-preflight.sh` remains the published-module release gate. It is
-not part of the current `go.work` proof path.
+not part of the current `go.work` proof path. Use plain `go test ./...` and
+`go vet ./...` as the checked-in workspace gate only after sibling checkouts are
+clean.
 
 ## Stop Condition
 
 This pass productizes the proof enough to expose reusable package boundaries,
 better measurement/candidate-policy surfaces, a Pion `transport.Net` adapter,
 two-host Bonjour signaling, long selected-link soak data, and a readable local
-SwiftUI active-path view. LAN, Thunderbolt, and AWDL Pion-native WebRTC now pass
-from the local `go.work` workspace, and raw UDP passes in both directions with
-path evidence. The remaining product work is the two-live-Mac SwiftUI visual
+SwiftUI active-path view. LAN, Thunderbolt, and AWDL Pion-native WebRTC passed
+from the 2026-05-19 local `go.work` workspace matrix, and raw UDP passed in
+both directions with path evidence. The current 2026-05-20 published-module
+gate passes, while the checked-in `go.work` gate is blocked by dirty `../apple`
+generated files. The remaining product work is the two-live-Mac SwiftUI visual
 observation and physical Thunderbolt-removal fallback proof; the smoke-tested
 harness now reduces that proof to a repeatable launch plus human cable removal.
